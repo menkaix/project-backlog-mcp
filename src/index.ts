@@ -176,14 +176,21 @@ class BacklogMCPServer {
   private setupMCPHandlers() {
     // Initialize handler - REQUIRED for MCP protocol
     this.server.setRequestHandler(InitializeRequestSchema, async (request) => {
+      const clientVersion = request.params.protocolVersion;
+      const supportedVersions = ["2025-03-26", "2024-11-05"];
+      
+      // Use client's version if we support it, otherwise use our latest supported version
+      const negotiatedVersion = supportedVersions.includes(clientVersion) ? clientVersion : supportedVersions[0];
+      
       logger.info('MCP Initialize Request:', {
-        protocolVersion: request.params.protocolVersion,
+        clientProtocolVersion: clientVersion,
+        negotiatedProtocolVersion: negotiatedVersion,
         capabilities: request.params.capabilities,
         clientInfo: request.params.clientInfo
       });
 
       return {
-        protocolVersion: "2024-11-05",
+        protocolVersion: negotiatedVersion,
         capabilities: {
           tools: {
             listChanged: false
@@ -527,9 +534,16 @@ class BacklogMCPServer {
         });
 
         if (method === 'initialize') {
+          const clientVersion = params?.protocolVersion;
+          const supportedVersions = ["2025-03-26", "2024-11-05"];
+          
+          // Use client's version if we support it, otherwise use our latest supported version
+          const negotiatedVersion = supportedVersions.includes(clientVersion) ? clientVersion : supportedVersions[0];
+          
           logger.info('MCP Initialize Request (HTTP):', {
             requestId,
-            protocolVersion: params?.protocolVersion,
+            clientProtocolVersion: clientVersion,
+            negotiatedProtocolVersion: negotiatedVersion,
             capabilities: params?.capabilities,
             clientInfo: params?.clientInfo,
             tokenId: authToken.id,
@@ -537,7 +551,7 @@ class BacklogMCPServer {
           });
 
           res.json({
-            protocolVersion: "2024-11-05",
+            protocolVersion: negotiatedVersion,
             capabilities: {
               tools: {
                 listChanged: false
