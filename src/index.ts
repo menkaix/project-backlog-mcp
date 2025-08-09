@@ -517,40 +517,37 @@ class BacklogMCPServer {
       });
     });
 
-    // MCP endpoint for HTTP transport
-    apiRouter.post('/mcp', authMiddleware, async (req, res): Promise<void> => {
-      const requestId = (req as any).requestId;
-      const authToken = (req as any).authToken;
+    // Shared MCP message handler
+    const handleMCPMessage = async (message: any, authToken: any, requestId: string) => {
+      const { method, params } = message;
       
-      try {
-        const { method, params } = req.body;
+      logger.info('MCP Message Processing', {
+        requestId,
+        method,
+        params: params ? JSON.stringify(params, null, 2) : 'No params',
+        tokenId: authToken.id,
+        tokenType: authToken.type
+      });
+
+      if (method === 'initialize') {
+        const clientVersion = params?.protocolVersion;
+        const supportedVersions = ["2025-03-26", "2024-11-05"];
         
-        logger.info('MCP Request Processing', {
+        // Use client's version if we support it, otherwise use our latest supported version
+        const negotiatedVersion = supportedVersions.includes(clientVersion) ? clientVersion : supportedVersions[0];
+        
+        logger.info('MCP Initialize Request:', {
           requestId,
-          method,
-          params: params ? JSON.stringify(params, null, 2) : 'No params',
+          clientProtocolVersion: clientVersion,
+          negotiatedProtocolVersion: negotiatedVersion,
+          capabilities: params?.capabilities,
+          clientInfo: params?.clientInfo,
           tokenId: authToken.id,
           tokenType: authToken.type
         });
 
-        if (method === 'initialize') {
-          const clientVersion = params?.protocolVersion;
-          const supportedVersions = ["2025-03-26", "2024-11-05"];
-          
-          // Use client's version if we support it, otherwise use our latest supported version
-          const negotiatedVersion = supportedVersions.includes(clientVersion) ? clientVersion : supportedVersions[0];
-          
-          logger.info('MCP Initialize Request (HTTP):', {
-            requestId,
-            clientProtocolVersion: clientVersion,
-            negotiatedProtocolVersion: negotiatedVersion,
-            capabilities: params?.capabilities,
-            clientInfo: params?.clientInfo,
-            tokenId: authToken.id,
-            tokenType: authToken.type
-          });
-
-          res.json({
+        return {
+          result: {
             protocolVersion: negotiatedVersion,
             capabilities: {
               tools: {
@@ -569,236 +566,248 @@ class BacklogMCPServer {
               name: "project-backlog-mcp-server",
               version: "1.0.0"
             }
-          });
-          return;
-        }
+          }
+        };
+      }
 
-        if (method === 'tools/list') {
-          logger.debug('Processing tools/list request', { requestId });
-          
-          const filteredTools = allTools.filter(tool => {
-            const requiredPermissions = TOOL_PERMISSIONS[tool.name as keyof typeof TOOL_PERMISSIONS] || [];
-            const hasPermission = authManager.hasPermission(authToken, [...requiredPermissions]);
-            
-            logger.debug('Tool Permission Check', {
-              requestId,
-              toolName: tool.name,
-              requiredPermissions,
-              userPermissions: authToken.permissions,
-              hasPermission
-            });
-            
-            return hasPermission;
-          });
-          
-          logger.info('Tools List Response', {
-            requestId,
-            totalTools: allTools.length,
-            filteredTools: filteredTools.length,
-            toolNames: filteredTools.map(t => t.name)
-          });
-          
-          res.json({ tools: filteredTools });
-          return;
-        }
-
-        if (method === 'tools/call') {
-          const { name, arguments: args } = params;
-          
-          logger.info('Tool Call Request', {
-            requestId,
-            toolName: name,
-            arguments: args ? JSON.stringify(args, null, 2) : 'No arguments'
-          });
-          
-          // Check permissions
-          const requiredPermissions = TOOL_PERMISSIONS[name as keyof typeof TOOL_PERMISSIONS] || [];
+      if (method === 'tools/list') {
+        logger.debug('Processing tools/list request', { requestId });
+        
+        const filteredTools = allTools.filter(tool => {
+          const requiredPermissions = TOOL_PERMISSIONS[tool.name as keyof typeof TOOL_PERMISSIONS] || [];
           const hasPermission = authManager.hasPermission(authToken, [...requiredPermissions]);
           
           logger.debug('Tool Permission Check', {
             requestId,
-            toolName: name,
+            toolName: tool.name,
             requiredPermissions,
             userPermissions: authToken.permissions,
             hasPermission
           });
           
-          if (!hasPermission) {
-            logger.warn('Tool Access Denied - Insufficient Permissions', {
-              requestId,
-              toolName: name,
-              requiredPermissions,
-              userPermissions: authToken.permissions,
-              tokenId: authToken.id
-            });
-            res.status(403).json({ error: 'Insufficient permissions for this tool' });
-            return;
-          }
+          return hasPermission;
+        });
+        
+        logger.info('Tools List Response', {
+          requestId,
+          totalTools: allTools.length,
+          filteredTools: filteredTools.length,
+          toolNames: filteredTools.map(t => t.name)
+        });
+        
+        return { result: { tools: filteredTools } };
+      }
 
-          if (!allHandlers[name as keyof typeof allHandlers]) {
-            logger.error('Tool Not Found', {
-              requestId,
-              toolName: name,
-              availableTools: Object.keys(allHandlers)
-            });
-            res.status(404).json({ error: `Unknown tool: ${name}` });
-            return;
-          }
-
-          logger.info('Executing Tool', {
+      if (method === 'tools/call') {
+        const { name, arguments: args } = params;
+        
+        logger.info('Tool Call Request', {
+          requestId,
+          toolName: name,
+          arguments: args ? JSON.stringify(args, null, 2) : 'No arguments'
+        });
+        
+        // Check permissions
+        const requiredPermissions = TOOL_PERMISSIONS[name as keyof typeof TOOL_PERMISSIONS] || [];
+        const hasPermission = authManager.hasPermission(authToken, [...requiredPermissions]);
+        
+        logger.debug('Tool Permission Check', {
+          requestId,
+          toolName: name,
+          requiredPermissions,
+          userPermissions: authToken.permissions,
+          hasPermission
+        });
+        
+        if (!hasPermission) {
+          logger.warn('Tool Access Denied - Insufficient Permissions', {
             requestId,
             toolName: name,
-            startTime: new Date().toISOString()
+            requiredPermissions,
+            userPermissions: authToken.permissions,
+            tokenId: authToken.id
           });
+          throw new Error('Insufficient permissions for this tool');
+        }
 
-          const toolStartTime = Date.now();
-          const handler = allHandlers[name as keyof typeof allHandlers];
-          const result = await handler(args);
-          const toolDuration = Date.now() - toolStartTime;
-          
-          logger.info('Tool Execution Completed', {
+        if (!allHandlers[name as keyof typeof allHandlers]) {
+          logger.error('Tool Not Found', {
             requestId,
             toolName: name,
-            duration: `${toolDuration}ms`,
-            resultType: typeof result,
-            resultLength: typeof result === 'string' ? result.length : JSON.stringify(result).length
+            availableTools: Object.keys(allHandlers)
           });
-          
-          res.json({
+          throw new Error(`Unknown tool: ${name}`);
+        }
+
+        logger.info('Executing Tool', {
+          requestId,
+          toolName: name,
+          startTime: new Date().toISOString()
+        });
+
+        const toolStartTime = Date.now();
+        const handler = allHandlers[name as keyof typeof allHandlers];
+        const result = await handler(args);
+        const toolDuration = Date.now() - toolStartTime;
+        
+        logger.info('Tool Execution Completed', {
+          requestId,
+          toolName: name,
+          duration: `${toolDuration}ms`,
+          resultType: typeof result,
+          resultLength: typeof result === 'string' ? result.length : JSON.stringify(result).length
+        });
+        
+        return {
+          result: {
             content: [{
               type: 'text',
               text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
             }]
-          });
-          return;
-        }
+          }
+        };
+      }
 
-        if (method === 'resources/list') {
-          logger.debug('Processing resources/list request', { requestId });
-          
-          const resources = resourceManager.getAvailableResources();
-          
-          logger.info('Resources List Response', {
-            requestId,
-            totalResources: resources.length,
-            resourceUris: resources.map(r => r.uri)
-          });
-          
-          res.json({
+      if (method === 'resources/list') {
+        logger.debug('Processing resources/list request', { requestId });
+        
+        const resources = resourceManager.getAvailableResources();
+        
+        logger.info('Resources List Response', {
+          requestId,
+          totalResources: resources.length,
+          resourceUris: resources.map(r => r.uri)
+        });
+        
+        return {
+          result: {
             resources: resources.map(resource => ({
               uri: resource.uri,
               name: resource.name,
               description: resource.description,
               mimeType: resource.mimeType
             }))
-          });
-          return;
-        }
+          }
+        };
+      }
 
-        if (method === 'resources/read') {
-          const { uri } = params;
+      if (method === 'resources/read') {
+        const { uri } = params;
+        
+        logger.info('Resource Read Request', {
+          requestId,
+          uri
+        });
+        
+        try {
+          const content = await resourceManager.readResource(uri);
           
-          logger.info('Resource Read Request', {
+          logger.info('Resource Read Completed', {
             requestId,
-            uri
+            uri,
+            contentLength: content.length
           });
           
-          try {
-            const content = await resourceManager.readResource(uri);
-            
-            logger.info('Resource Read Completed', {
-              requestId,
-              uri,
-              contentLength: content.length
-            });
-            
-            res.json({
+          return {
+            result: {
               contents: [{
                 uri,
                 mimeType: 'text/plain',
                 text: content
               }]
-            });
-            return;
-          } catch (error) {
-            logger.error('Resource Read Error', {
-              requestId,
-              uri,
-              error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            res.status(500).json({ 
-              error: `Failed to read resource ${uri}: ${error instanceof Error ? error.message : 'Unknown error'}` 
-            });
-            return;
-          }
-        }
-
-        if (method === 'prompts/list') {
-          logger.debug('Processing prompts/list request', { requestId });
-          
-          const prompts = promptManager.getAvailablePrompts();
-          
-          logger.info('Prompts List Response', {
+            }
+          };
+        } catch (error) {
+          logger.error('Resource Read Error', {
             requestId,
-            totalPrompts: prompts.length,
-            promptNames: prompts.map(p => p.name)
+            uri,
+            error: error instanceof Error ? error.message : 'Unknown error'
           });
-          
-          res.json({
+          throw new Error(`Failed to read resource ${uri}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+
+      if (method === 'prompts/list') {
+        logger.debug('Processing prompts/list request', { requestId });
+        
+        const prompts = promptManager.getAvailablePrompts();
+        
+        logger.info('Prompts List Response', {
+          requestId,
+          totalPrompts: prompts.length,
+          promptNames: prompts.map(p => p.name)
+        });
+        
+        return {
+          result: {
             prompts: prompts.map(prompt => ({
               name: prompt.name,
               description: prompt.description,
               arguments: prompt.arguments || []
             }))
-          });
-          return;
-        }
+          }
+        };
+      }
 
-        if (method === 'prompts/get') {
-          const { name, arguments: args } = params;
+      if (method === 'prompts/get') {
+        const { name, arguments: args } = params;
+        
+        logger.info('Prompt Get Request', {
+          requestId,
+          promptName: name,
+          arguments: args ? JSON.stringify(args, null, 2) : 'No arguments'
+        });
+        
+        try {
+          const messages = await promptManager.getPrompt(name, args || {});
           
-          logger.info('Prompt Get Request', {
+          logger.info('Prompt Get Completed', {
             requestId,
             promptName: name,
-            arguments: args ? JSON.stringify(args, null, 2) : 'No arguments'
+            messageCount: messages.length
           });
           
-          try {
-            const messages = await promptManager.getPrompt(name, args || {});
-            
-            logger.info('Prompt Get Completed', {
-              requestId,
-              promptName: name,
-              messageCount: messages.length
-            });
-            
-            res.json({
+          return {
+            result: {
               messages: messages.map(msg => ({
                 role: msg.role,
                 content: msg.content
               }))
-            });
-            return;
-          } catch (error) {
-            logger.error('Prompt Get Error', {
-              requestId,
-              promptName: name,
-              error: error instanceof Error ? error.message : 'Unknown error'
-            });
-            res.status(500).json({ 
-              error: `Failed to get prompt ${name}: ${error instanceof Error ? error.message : 'Unknown error'}` 
-            });
-            return;
-          }
+            }
+          };
+        } catch (error) {
+          logger.error('Prompt Get Error', {
+            requestId,
+            promptName: name,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+          throw new Error(`Failed to get prompt ${name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
+      }
 
-        logger.warn('Unsupported MCP Method', {
-          requestId,
-          method,
-          supportedMethods: ['initialize', 'tools/list', 'tools/call', 'resources/list', 'resources/read', 'prompts/list', 'prompts/get']
-        });
+      logger.warn('Unsupported MCP Method', {
+        requestId,
+        method,
+        supportedMethods: ['initialize', 'tools/list', 'tools/call', 'resources/list', 'resources/read', 'prompts/list', 'prompts/get']
+      });
+      
+      throw new Error('Unsupported method');
+    };
+
+    // MCP endpoint for HTTP transport (existing - for Postman, etc.)
+    apiRouter.post('/mcp', authMiddleware, async (req, res): Promise<void> => {
+      const requestId = (req as any).requestId;
+      const authToken = (req as any).authToken;
+      
+      try {
+        const response = await handleMCPMessage(req.body, authToken, requestId);
         
-        res.status(400).json({ error: 'Unsupported method' });
+        // Convert result format for HTTP response
+        if (response.result) {
+          res.json(response.result);
+        } else {
+          res.json(response);
+        }
       } catch (error) {
         logger.error('MCP HTTP Request Error', {
           requestId,
@@ -811,12 +820,171 @@ class BacklogMCPServer {
           params: req.body?.params
         });
         
-        res.status(500).json({ 
-          error: 'Internal server error',
-          message: error instanceof Error ? error.message : 'Unknown error',
-          requestId
-        });
+        if (error instanceof Error && error.message === 'Insufficient permissions for this tool') {
+          res.status(403).json({ error: error.message });
+        } else if (error instanceof Error && error.message.startsWith('Unknown tool:')) {
+          res.status(404).json({ error: error.message });
+        } else {
+          res.status(500).json({ 
+            error: 'Internal server error',
+            message: error instanceof Error ? error.message : 'Unknown error',
+            requestId
+          });
+        }
       }
+    });
+
+    // MCP endpoint for HTTP streaming transport (new - for n8n)
+    apiRouter.post('/mcp/stream', authMiddleware, async (req, res): Promise<void> => {
+      const requestId = (req as any).requestId;
+      const authToken = (req as any).authToken;
+      
+      logger.info('MCP Streaming Connection Started', {
+        requestId,
+        tokenId: authToken.id,
+        tokenType: authToken.type,
+        clientIP: req.ip || req.connection.remoteAddress
+      });
+
+      // Set up streaming response headers
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Transfer-Encoding': 'chunked',
+        'Connection': 'keep-alive',
+        'Cache-Control': 'no-cache',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+      });
+
+      let buffer = '';
+      let messageCount = 0;
+
+      // Handle incoming streaming data
+      req.on('data', async (chunk) => {
+        try {
+          buffer += chunk.toString();
+          
+          // Process complete JSON messages (separated by newlines)
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+          
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine) {
+              messageCount++;
+              
+              logger.debug('Processing Streaming Message', {
+                requestId,
+                messageCount,
+                messageLength: trimmedLine.length,
+                messagePreview: trimmedLine.substring(0, 100)
+              });
+
+              try {
+                const message = JSON.parse(trimmedLine);
+                
+                try {
+                  const response = await handleMCPMessage(message, authToken, `${requestId}-${messageCount}`);
+                  
+                  // Send response as JSON line
+                  const responseJson = JSON.stringify(response) + '\n';
+                  res.write(responseJson);
+                  
+                  logger.debug('Streaming Response Sent', {
+                    requestId,
+                    messageCount,
+                    method: message.method,
+                    responseLength: responseJson.length
+                  });
+                } catch (handlerError) {
+                  logger.error('Message Handler Error in Streaming', {
+                    requestId,
+                    messageCount,
+                    error: handlerError instanceof Error ? handlerError.message : 'Unknown handler error'
+                  });
+                  
+                  const errorResponse = JSON.stringify({
+                    error: {
+                      code: -32603,
+                      message: 'Internal error',
+                      data: handlerError instanceof Error ? handlerError.message : 'Unknown error'
+                    }
+                  }) + '\n';
+                  
+                  res.write(errorResponse);
+                }
+                
+              } catch (parseError) {
+                logger.error('JSON Parse Error in Streaming', {
+                  requestId,
+                  messageCount,
+                  error: parseError instanceof Error ? parseError.message : 'Unknown parse error',
+                  rawMessage: trimmedLine.substring(0, 200)
+                });
+                
+                const errorResponse = JSON.stringify({
+                  error: {
+                    code: -32700,
+                    message: 'Parse error',
+                    data: parseError instanceof Error ? parseError.message : 'Invalid JSON'
+                  }
+                }) + '\n';
+                
+                res.write(errorResponse);
+              }
+            }
+          }
+        } catch (error) {
+          logger.error('Streaming Data Processing Error', {
+            requestId,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      });
+
+      // Handle end of request
+      req.on('end', () => {
+        logger.info('MCP Streaming Connection Ended', {
+          requestId,
+          totalMessages: messageCount,
+          tokenId: authToken.id
+        });
+        res.end();
+      });
+
+      // Handle request errors
+      req.on('error', (error) => {
+        logger.error('MCP Streaming Request Error', {
+          requestId,
+          error: error.message,
+          tokenId: authToken.id
+        });
+        
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+        }
+        
+        const errorResponse = JSON.stringify({
+          error: {
+            code: -32603,
+            message: 'Internal error',
+            data: error.message
+          }
+        }) + '\n';
+        
+        res.write(errorResponse);
+        res.end();
+      });
+
+      // Handle client disconnect
+      req.on('close', () => {
+        logger.info('MCP Streaming Client Disconnected', {
+          requestId,
+          totalMessages: messageCount,
+          tokenId: authToken.id
+        });
+      });
     });
 
     // Admin endpoints (master token only)

@@ -326,9 +326,11 @@ Master tokens can access admin endpoints:
 GET /backlog-mcp/health
 ```
 
-### MCP Endpoint
+### MCP Endpoints
 
-**Important**: This server follows the Model Context Protocol (MCP) standard. All tool operations go through a single endpoint with different methods in the request body.
+**Important**: This server follows the Model Context Protocol (MCP) standard. All tool operations go through MCP endpoints with different methods in the request body.
+
+#### Standard HTTP MCP Endpoint (for Postman, curl, etc.)
 
 ```
 POST /backlog-mcp/mcp
@@ -341,7 +343,27 @@ Content-Type: application/json
 }
 ```
 
-**⚠️ Common Mistake**: Do NOT use REST-style endpoints like `/backlog-mcp/tools/list` - these will return 404 errors. All operations must use the single MCP endpoint above.
+#### HTTP Streaming MCP Endpoint (for n8n, streaming clients)
+
+```
+POST /backlog-mcp/mcp/stream
+Authorization: Bearer <token>
+Content-Type: application/json
+Connection: keep-alive
+
+{"method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "client", "version": "1.0.0"}}}
+{"method": "tools/list"}
+{"method": "tools/call", "params": {"name": "list_projects", "arguments": {}}}
+```
+
+The streaming endpoint:
+
+- Accepts multiple JSON messages separated by newlines
+- Maintains persistent connection
+- Responds with JSON messages for each request
+- Compatible with n8n's "HTTP Streamable" transport
+
+**⚠️ Common Mistake**: Do NOT use REST-style endpoints like `/backlog-mcp/tools/list` - these will return 404 errors. All operations must use the MCP endpoints above.
 
 ### List Available Tools
 
