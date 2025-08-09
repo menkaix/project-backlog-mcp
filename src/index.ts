@@ -4,7 +4,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ErrorCode,
+  InitializeRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+  ReadResourceRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
@@ -16,6 +21,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { HyperManagerAPIClient } from './api-client.js';
 import { AuthManager } from './auth.js';
+import { ResourceManager } from './resources.js';
+import { PromptManager } from './prompts.js';
 import { TOOL_PERMISSIONS } from './types.js';
 import { setupDiagramTools } from './tools/diagrams.js';
 import { setupProjectTools } from './tools/projects.js';
@@ -70,6 +77,8 @@ logger.info('Environment Configuration:', {
 // Initialize clients
 const apiClient = new HyperManagerAPIClient(HYPERMANAGER_API_KEY);
 const authManager = new AuthManager(MCP_SERVER_SECRET, ALLOWED_TOKENS);
+const resourceManager = new ResourceManager(apiClient);
+const promptManager = new PromptManager(apiClient);
 
 // Setup tools
 const diagramTools = setupDiagramTools(apiClient);
@@ -141,6 +150,8 @@ class BacklogMCPServer {
       {
         capabilities: {
           tools: {},
+          resources: {},
+          prompts: {},
         },
       }
     );
@@ -163,6 +174,104 @@ class BacklogMCPServer {
   }
 
   private setupMCPHandlers() {
+    // Initialize handler - REQUIRED for MCP protocol
+    this.server.setRequestHandler(InitializeRequestSchema, async (request) => {
+      logger.info('MCP Initialize Request:', {
+        protocolVersion: request.params.protocolVersion,
+        capabilities: request.params.capabilities,
+        clientInfo: request.params.clientInfo
+      });
+
+      return {
+        protocolVersion: "2024-11-05",
+        capabilities: {
+          tools: {},
+          resources: {},
+          prompts: {},
+          logging: {}
+        },
+        serverInfo: {
+          name: "project-backlog-mcp-server",
+          version: "1.0.0"
+        }
+      };
+    });
+
+    // Resources handlers
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+      logger.debug('Listing available resources');
+      const resources = resourceManager.getAvailableResources();
+      
+      return {
+        resources: resources.map(resource => ({
+          uri: resource.uri,
+          name: resource.name,
+          description: resource.description,
+          mimeType: resource.mimeType
+        }))
+      };
+    });
+
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const { uri } = request.params;
+      logger.info('Reading resource:', { uri });
+      
+      try {
+        const content = await resourceManager.readResource(uri);
+        
+        return {
+          contents: [{
+            uri,
+            mimeType: 'text/plain', // Default, could be enhanced based on resource type
+            text: content
+          }]
+        };
+      } catch (error) {
+        logger.error('Error reading resource:', { uri, error });
+        throw new McpError(
+          ErrorCode.InternalError,
+          `Failed to read resource ${uri}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+      }
+    });
+
+    // Prompts handlers
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
+      logger.debug('Listing available prompts');
+      const prompts = promptManager.getAvailablePrompts();
+      
+      return {
+        prompts: prompts.map(prompt => ({
+          name: prompt.name,
+          description: prompt.description,
+          arguments: prompt.arguments || []
+        }))
+      };
+    });
+
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+      logger.info('Getting prompt:', { name, args });
+      
+      try {
+        const messages = await promptManager.getPrompt(name, args || {});
+        
+        return {
+          messages: messages.map(msg => ({
+            role: msg.role,
+            content: msg.content
+          }))
+        };
+      } catch (error) {
+        logger.error('Error getting prompt:', { name, args, error });
+        throw new McpError(
+          ErrorCode.InternalError,
+          `Failed to get prompt ${name}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+      }
+    });
+
+    // Tools handlers
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: allTools,
     }));
@@ -510,10 +619,129 @@ class BacklogMCPServer {
           return;
         }
 
+        if (method === 'resources/list') {
+          logger.debug('Processing resources/list request', { requestId });
+          
+          const resources = resourceManager.getAvailableResources();
+          
+          logger.info('Resources List Response', {
+            requestId,
+            totalResources: resources.length,
+            resourceUris: resources.map(r => r.uri)
+          });
+          
+          res.json({
+            resources: resources.map(resource => ({
+              uri: resource.uri,
+              name: resource.name,
+              description: resource.description,
+              mimeType: resource.mimeType
+            }))
+          });
+          return;
+        }
+
+        if (method === 'resources/read') {
+          const { uri } = params;
+          
+          logger.info('Resource Read Request', {
+            requestId,
+            uri
+          });
+          
+          try {
+            const content = await resourceManager.readResource(uri);
+            
+            logger.info('Resource Read Completed', {
+              requestId,
+              uri,
+              contentLength: content.length
+            });
+            
+            res.json({
+              contents: [{
+                uri,
+                mimeType: 'text/plain',
+                text: content
+              }]
+            });
+            return;
+          } catch (error) {
+            logger.error('Resource Read Error', {
+              requestId,
+              uri,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            res.status(500).json({ 
+              error: `Failed to read resource ${uri}: ${error instanceof Error ? error.message : 'Unknown error'}` 
+            });
+            return;
+          }
+        }
+
+        if (method === 'prompts/list') {
+          logger.debug('Processing prompts/list request', { requestId });
+          
+          const prompts = promptManager.getAvailablePrompts();
+          
+          logger.info('Prompts List Response', {
+            requestId,
+            totalPrompts: prompts.length,
+            promptNames: prompts.map(p => p.name)
+          });
+          
+          res.json({
+            prompts: prompts.map(prompt => ({
+              name: prompt.name,
+              description: prompt.description,
+              arguments: prompt.arguments || []
+            }))
+          });
+          return;
+        }
+
+        if (method === 'prompts/get') {
+          const { name, arguments: args } = params;
+          
+          logger.info('Prompt Get Request', {
+            requestId,
+            promptName: name,
+            arguments: args ? JSON.stringify(args, null, 2) : 'No arguments'
+          });
+          
+          try {
+            const messages = await promptManager.getPrompt(name, args || {});
+            
+            logger.info('Prompt Get Completed', {
+              requestId,
+              promptName: name,
+              messageCount: messages.length
+            });
+            
+            res.json({
+              messages: messages.map(msg => ({
+                role: msg.role,
+                content: msg.content
+              }))
+            });
+            return;
+          } catch (error) {
+            logger.error('Prompt Get Error', {
+              requestId,
+              promptName: name,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            });
+            res.status(500).json({ 
+              error: `Failed to get prompt ${name}: ${error instanceof Error ? error.message : 'Unknown error'}` 
+            });
+            return;
+          }
+        }
+
         logger.warn('Unsupported MCP Method', {
           requestId,
           method,
-          supportedMethods: ['tools/list', 'tools/call']
+          supportedMethods: ['tools/list', 'tools/call', 'resources/list', 'resources/read', 'prompts/list', 'prompts/get']
         });
         
         res.status(400).json({ error: 'Unsupported method' });

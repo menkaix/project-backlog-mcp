@@ -1,0 +1,422 @@
+swagger: "2.0"
+
+produces:
+  - application/json
+  - text/plain
+
+x-google-backend:
+  address: https://project-backlogs-987527585012.europe-west1.run.app
+  deadline: 60
+
+schemes:
+  - "https"
+
+securityDefinitions:
+  # This section configures basic authentication with an API key.
+  api_key_query:
+    type: "apiKey"
+    name: "api_key"
+    in: "query"
+  api_key_header:
+    type: "apiKey"
+    name: "x-api-key"
+    in: "header"
+
+security:
+  - api_key_query: []
+  - api_key_header: []
+
+paths:
+  "/diagrams":
+    post:
+      description: "creates a diagram"
+      operationId: "add-diagram"
+      parameters:
+        - name: request
+          in: body
+          description: "creates a diagram in our database"
+          schema:
+            type: object
+            required:
+              - name
+              - definition
+            properties:
+              name:
+                type: string
+              definition:
+                type: string
+
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+        400:
+          description: "Diagram JSON is invalid"
+    get:
+      description: "get a lists of diagrams a diagram"
+      operationId: "get-list-diagrams"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+  "/diagram/update-graphic/{diagram_name}":
+    patch:
+      description: "updates a diagram and returns image"
+      operationId: "update-diagram-graphic"
+      parameters:
+        - name: diagram_name
+          in: path
+          type: string
+          required: true
+          description: mongo id of the diagram
+        - in: body
+          name: request
+          description: "json body in the the updates"
+          schema:
+            type: string
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+        400:
+          description: "Input missing or malformed"
+  "/diagrams/{id}":
+    patch:
+      description: "updates a diagram"
+      operationId: "update-diagram"
+      parameters:
+        - name: id
+          in: path
+          type: string
+          required: true
+          description: mongo id of the diagram
+        - name: request
+          in: body
+          description: "json body in the the updates"
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+        400:
+          description: "The IATA code is invalid or missing."
+
+  "/diagram/png/{diagram_name}":
+    get:
+      description: "gets a diagram as png"
+      operationId: "get-png-diagram"
+      parameters:
+        - name: diagram_name
+          in: path
+          type: string
+          required: true
+          description: "mongo id of the diagram"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+
+  "/diagram/plant-url/{diagram_name}":
+    get:
+      description: "gets a diagram as plantUML url"
+      operationId: "get-plant-url-diagram"
+      parameters:
+        - name: diagram_name
+          in: path
+          type: string
+          required: true
+          description: "mongo id of the diagram"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+  "/diagram/{id}":
+    get:
+      description: "gets a diagram"
+      operationId: "get-diagram"
+      parameters:
+        - name: id
+          in: path
+          type: string
+          required: true
+          description: "mongo id of the diagram"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+  "/project-command/all":
+    get:
+      description: "get a lists of projects"
+      operationId: "get-list-projects"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+  "/project-command/{project}/tree":
+    get:
+      description: "get a lists of projects"
+      operationId: "get-projects-tree"
+      parameters:
+        - name: project
+          in: path
+          type: string
+          required: true
+          description: "get the components of a project in tree form"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+
+  "/featuretypes":
+    get:
+      description: "get a lists of feature-types"
+      operationId: "get-list-feature-types"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+  "/projects":
+    post:
+      description: "creates a project"
+      operationId: "add-project"
+      parameters:
+        - name: request
+          in: body
+          description: "creates a project in our database"
+          schema:
+            type: object
+            required:
+              - name
+              - code
+            properties:
+              name:
+                type: string
+              code:
+                type: string
+              clientName:
+                type: string
+              description:
+                type: string
+
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+        400:
+          description: "Diagram JSON is invalid"
+  "/story-command/{storyID}/tree":
+    get:
+      description: "Get the story tree by story ID"
+      operationId: "get-story-tree"
+      parameters:
+        - name: storyID
+          in: path
+          type: string
+          required: true
+          description: "ID of the story"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+  "/story-command/update":
+    post:
+      description: "Update a story"
+      operationId: "update-story"
+      parameters:
+        - name: request
+          in: body
+          description: "Story data to update"
+          schema:
+            type: object
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+
+  "/feature-command/refresh-types":
+    get:
+      description: "Refresh feature types"
+      operationId: "refresh-feature-types"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+  "/feature-command/{story}/add":
+    post:
+      description: "Add a feature to a story"
+      operationId: "add-feature-to-story"
+      parameters:
+        - name: story
+          in: path
+          type: string
+          required: true
+          description: "ID of the story"
+        - name: request
+          in: body
+          description: "Feature data to add"
+          schema:
+            type: object
+      responses:
+        201:
+          description: "Created."
+          schema:
+            type: string
+        404:
+          description: "Story not found."
+  "/feature-command/{parent}/add-child":
+    post:
+      description: "Add a child feature to a parent feature"
+      operationId: "add-child-feature"
+      parameters:
+        - name: parent
+          in: path
+          type: string
+          required: true
+          description: "ID of the parent feature"
+        - name: request
+          in: body
+          description: "Child feature data to add"
+          schema:
+            type: object
+      responses:
+        201:
+          description: "Created."
+          schema:
+            type: string
+        404:
+          description: "Parent feature not found."
+  "/feature-command/{parent}/adopt/{child}":
+    post:
+      description: "Adopt a child feature"
+      operationId: "adopt-child-feature"
+      parameters:
+        - name: parent
+          in: path
+          type: string
+          required: true
+          description: "ID of the parent feature"
+        - name: child
+          in: path
+          type: string
+          required: true
+          description: "ID of the child feature"
+      responses:
+        201:
+          description: "Created."
+          schema:
+            type: string
+        404:
+          description: "Parent or child feature not found."
+
+  "/actor-command/{project}/add":
+    post:
+      description: "Add an actor to a project"
+      operationId: "add-actor"
+      parameters:
+        - name: project
+          in: path
+          type: string
+          required: true
+          description: "ID of the project"
+        - name: request
+          in: body
+          description: "Actor data to add"
+          schema:
+            type: object
+      responses:
+        201:
+          description: "Created."
+          schema:
+            type: string
+        502:
+          description: "Bad Gateway."
+  "/actor-command/{project}/{name}/add-story":
+    post:
+      description: "Add a story to an actor"
+      operationId: "add-story-to-actor"
+      parameters:
+        - name: project
+          in: path
+          type: string
+          required: true
+          description: "ID of the project"
+        - name: name
+          in: path
+          type: string
+          required: true
+          description: "Name of the actor"
+        - name: request
+          in: body
+          description: "Story data to add"
+          schema:
+            type: object
+      responses:
+        201:
+          description: "Created."
+          schema:
+            type: string
+        502:
+          description: "Bad Gateway."
+  "/normalize-tasks":
+    get:
+      description: "Normalize tasks"
+      operationId: "normalize-tasks"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+  "/diagram/plant-definition/{name}":
+    get:
+      description: "Get a diagram definition"
+      operationId: "get-diagram-definition"
+      parameters:
+        - name: name
+          in: path
+          type: string
+          required: true
+          description: "Name of the diagram"
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string
+  "/diagram/update/{name}":
+    patch:
+      description: "Update a diagram definition"
+      operationId: "update-diagram-definition"
+      parameters:
+        - name: name
+          in: path
+          type: string
+          required: true
+          description: "Name of the diagram"
+        - name: request
+          in: body
+          description: "Diagram definition data"
+          schema:
+            type: string
+      responses:
+        200:
+          description: "Success."
+          schema:
+            type: string

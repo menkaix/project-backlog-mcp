@@ -4,7 +4,10 @@ A Model Context Protocol (MCP) server that provides access to the HyperManager P
 
 ## Features
 
+- **Complete MCP Protocol Support**: Full implementation of MCP with initialize, tools, resources, and prompts
 - **Complete API Coverage**: Access all HyperManager API endpoints through MCP tools
+- **Smart Resources**: Auto-generated resources from Swagger API with intelligent caching
+- **Contextual Prompts**: Pre-built prompts for common project management tasks
 - **Secure Authentication**: Token-based authentication with different permission levels
 - **Remote Deployment**: Deploy on Railway, Render, Fly.io, or any cloud platform
 - **Rate Limiting**: Built-in protection against abuse
@@ -52,6 +55,55 @@ A Model Context Protocol (MCP) server that provides access to the HyperManager P
 ### Utility Tools
 
 - `normalize_tasks` - Normalize tasks
+
+## Available Resources
+
+The server provides intelligent resources that expose HyperManager data in a structured way for LLMs:
+
+### Diagram Resources
+
+- `resource://diagrams/` - List of all diagrams
+- `resource://diagrams/{id}` - Specific diagram details
+- `resource://diagrams/{name}/definition` - PlantUML definition
+- `resource://diagrams/{name}/png` - PNG image data
+- `resource://diagrams/{name}/plantuml-url` - PlantUML server URL
+
+### Project Resources
+
+- `resource://projects/` - List of all projects
+- `resource://projects/{project}/tree` - Complete project structure
+
+### Story Resources
+
+- `resource://stories/{storyId}/tree` - Story hierarchy and features
+
+### Feature Resources
+
+- `resource://features/types` - Available feature types
+
+### Meta Resources
+
+- `resource://api/schema` - Complete Swagger API schema
+- `resource://api/endpoints` - API endpoints summary
+
+## Available Prompts
+
+Pre-built prompts for common project management tasks:
+
+### Project Analysis
+
+- `analyze_project` - Comprehensive project structure analysis
+- `optimize_project_structure` - Suggestions for project optimization
+
+### Diagram Creation
+
+- `create_diagram` - Guided PlantUML diagram creation with best practices
+
+### Story Management
+
+- `generate_user_stories` - Generate well-structured user stories
+- `review_story_tree` - Analyze story completeness and structure
+- `suggest_features` - Recommend features based on context
 
 ## Quick Start
 
@@ -276,14 +328,30 @@ GET /backlog-mcp/health
 
 ### MCP Endpoint
 
+**Important**: This server follows the Model Context Protocol (MCP) standard. All tool operations go through a single endpoint with different methods in the request body.
+
 ```
 POST /backlog-mcp/mcp
 Authorization: Bearer <token>
+Content-Type: application/json
 
 {
-  "method": "tools/list" | "tools/call",
+  "method": "tools/list" | "tools/call" | "resources/list" | "resources/read" | "prompts/list" | "prompts/get",
   "params": { ... }
 }
+```
+
+**⚠️ Common Mistake**: Do NOT use REST-style endpoints like `/backlog-mcp/tools/list` - these will return 404 errors. All operations must use the single MCP endpoint above.
+
+### List Available Tools
+
+```bash
+curl -X POST https://yourdomain.com/backlog-mcp/mcp \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "tools/list"
+  }'
 ```
 
 ### Tool Call Example
@@ -300,6 +368,78 @@ curl -X POST https://yourdomain.com/backlog-mcp/mcp \
     }
   }'
 ```
+
+### Resources Examples
+
+List available resources:
+
+```bash
+curl -X POST https://yourdomain.com/backlog-mcp/mcp \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "resources/list"
+  }'
+```
+
+Read a specific resource:
+
+```bash
+curl -X POST https://yourdomain.com/backlog-mcp/mcp \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "resources/read",
+    "params": {
+      "uri": "resource://projects/"
+    }
+  }'
+```
+
+### Prompts Examples
+
+List available prompts:
+
+```bash
+curl -X POST https://yourdomain.com/backlog-mcp/mcp \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "prompts/list"
+  }'
+```
+
+Get a prompt with arguments:
+
+```bash
+curl -X POST https://yourdomain.com/backlog-mcp/mcp \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "prompts/get",
+    "params": {
+      "name": "analyze_project",
+      "arguments": {
+        "project": "my-project"
+      }
+    }
+  }'
+```
+
+### Available Endpoints Summary
+
+| Endpoint               | Method   | Purpose          | Authentication    |
+| ---------------------- | -------- | ---------------- | ----------------- |
+| `/backlog-mcp/health`  | GET      | Health check     | None              |
+| `/backlog-mcp/mcp`     | GET      | MCP info/usage   | None              |
+| `/backlog-mcp/mcp`     | POST     | MCP operations   | Required          |
+| `/backlog-mcp/admin/*` | POST/GET | Admin operations | Master token only |
+
+**❌ These endpoints DO NOT exist:**
+
+- `/backlog-mcp/tools/list` (use POST `/backlog-mcp/mcp` with `{"method": "tools/list"}`)
+- `/backlog-mcp/tools/call` (use POST `/backlog-mcp/mcp` with `{"method": "tools/call"}`)
+- `/backlog-mcp/projects` (use the MCP endpoint with appropriate tool calls)
 
 ### Admin Endpoints
 
@@ -399,19 +539,35 @@ Monitor your deployment:
 
 ### Common Issues
 
-1. **Authentication Failed**
+1. **404 Error on `/backlog-mcp/tools/list`**
+
+   - **Problem**: Trying to access REST-style endpoints that don't exist
+   - **Solution**: Use the MCP endpoint instead:
+
+     ```bash
+     # ❌ Wrong - This returns 404
+     curl https://yourdomain.com/backlog-mcp/tools/list
+
+     # ✅ Correct - Use MCP endpoint
+     curl -X POST https://yourdomain.com/backlog-mcp/mcp \
+       -H "Authorization: Bearer your-token" \
+       -H "Content-Type: application/json" \
+       -d '{"method": "tools/list"}'
+     ```
+
+2. **Authentication Failed**
 
    - Check your token is valid
    - Verify token hasn't expired
    - Ensure correct Authorization header
 
-2. **API Errors**
+3. **API Errors**
 
    - Verify HYPERMANAGER_API_KEY is correct
    - Check API endpoint availability
    - Review server logs
 
-3. **Connection Issues**
+4. **Connection Issues**
    - Confirm server is running
    - Check firewall/network settings
    - Verify URL is correct
