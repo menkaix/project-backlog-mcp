@@ -519,6 +519,32 @@ class BacklogMCPServer {
           tokenType: authToken.type
         });
 
+        if (method === 'initialize') {
+          logger.info('MCP Initialize Request (HTTP):', {
+            requestId,
+            protocolVersion: params?.protocolVersion,
+            capabilities: params?.capabilities,
+            clientInfo: params?.clientInfo,
+            tokenId: authToken.id,
+            tokenType: authToken.type
+          });
+
+          res.json({
+            protocolVersion: "2024-11-05",
+            capabilities: {
+              tools: {},
+              resources: {},
+              prompts: {},
+              logging: {}
+            },
+            serverInfo: {
+              name: "project-backlog-mcp-server",
+              version: "1.0.0"
+            }
+          });
+          return;
+        }
+
         if (method === 'tools/list') {
           logger.debug('Processing tools/list request', { requestId });
           
@@ -741,7 +767,7 @@ class BacklogMCPServer {
         logger.warn('Unsupported MCP Method', {
           requestId,
           method,
-          supportedMethods: ['tools/list', 'tools/call', 'resources/list', 'resources/read', 'prompts/list', 'prompts/get']
+          supportedMethods: ['initialize', 'tools/list', 'tools/call', 'resources/list', 'resources/read', 'prompts/list', 'prompts/get']
         });
         
         res.status(400).json({ error: 'Unsupported method' });
