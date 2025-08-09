@@ -20,9 +20,9 @@ services:
       - BASE_PATH=${BASE_PATH}
     logging:
       driver: "json-file"
-        options:
-          max-size: "10m" # Maximum size of each log file
-          max-file: "3"  # Maximum number of log files to keep
+      options:
+        max-size: "10m" # Maximum size of each log file
+        max-file: "3"  # Maximum number of log files to keep
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/backlog-mcp/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
       interval: 30s
