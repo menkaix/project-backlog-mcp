@@ -56,7 +56,14 @@ export function setupProjectTools(client: HyperManagerAPIClient) {
     handlers: {
       create_project: async (args: any) => {
         const validatedArgs = ProjectCreateSchema.parse(args);
-        return await client.createProject(validatedArgs);
+        // Filter out undefined values to satisfy exactOptionalPropertyTypes
+        const cleanedArgs = {
+          name: validatedArgs.name,
+          code: validatedArgs.code,
+          ...(validatedArgs.clientName !== undefined && { clientName: validatedArgs.clientName }),
+          ...(validatedArgs.description !== undefined && { description: validatedArgs.description })
+        };
+        return await client.createProject(cleanedArgs);
       },
       list_projects: async () => {
         return await client.listProjects();

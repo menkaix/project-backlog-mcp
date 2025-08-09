@@ -15,7 +15,7 @@ export class AuthManager {
       const authToken: AuthToken = {
         id: `static-${index}`,
         type: 'master',
-        permissions: PERMISSION_SETS.master,
+        permissions: PERMISSION_SETS['master'] || [],
         createdAt: new Date(),
         description: `Initial static token ${index + 1}`
       };
@@ -25,14 +25,14 @@ export class AuthManager {
 
   generateToken(type: TokenType, expiresIn?: string, description?: string): string {
     const tokenId = uuidv4();
-    const permissions = PERMISSION_SETS[type];
+    const permissions = PERMISSION_SETS[type] || [];
     
     const authToken: AuthToken = {
       id: tokenId,
       type,
       permissions,
       createdAt: new Date(),
-      description
+      ...(description && { description })
     };
 
     if (expiresIn) {
@@ -93,7 +93,7 @@ export class AuthManager {
 
       // Create auth token from JWT payload
       const authToken: AuthToken = {
-        id: payload.tokenId,
+        id: payload.tokenId || 'unknown',
         type: payload.type,
         permissions: payload.permissions,
         createdAt: new Date(payload.iat * 1000),
@@ -133,8 +133,8 @@ export class AuthManager {
       throw new Error('Invalid duration format. Use format like: 30s, 5m, 2h, 7d');
     }
 
-    const value = parseInt(match[1]);
-    const unit = match[2];
+    const value = parseInt(match[1]!);
+    const unit = match[2]!;
 
     switch (unit) {
       case 's': return value * 1000;

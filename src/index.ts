@@ -192,18 +192,20 @@ class BacklogMCPServer {
     const apiRouter = express.Router();
 
     // Auth middleware for API routes
-    const authMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const authMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction): void => {
       const token = req.headers.authorization?.replace('Bearer ', '') || 
                    req.headers['x-auth-token'] as string ||
                    req.query['token'] as string;
 
       if (!token) {
-        return res.status(401).json({ error: 'Authentication token required' });
+        res.status(401).json({ error: 'Authentication token required' });
+        return;
       }
 
       const authToken = authManager.verifyToken(token);
       if (!authToken) {
-        return res.status(401).json({ error: 'Invalid or expired token' });
+        res.status(401).json({ error: 'Invalid or expired token' });
+        return;
       }
 
       (req as any).authToken = authToken;
@@ -220,18 +222,19 @@ class BacklogMCPServer {
     });
 
     // MCP endpoint for HTTP transport
-    apiRouter.post('/mcp', authMiddleware, async (req, res) => {
+    apiRouter.post('/mcp', authMiddleware, async (req, res): Promise<void> => {
       try {
         const { method, params } = req.body;
         const authToken = (req as any).authToken;
 
         if (method === 'tools/list') {
-          return res.json({
+          res.json({
             tools: allTools.filter(tool => {
               const requiredPermissions = TOOL_PERMISSIONS[tool.name as keyof typeof TOOL_PERMISSIONS] || [];
               return authManager.hasPermission(authToken, [...requiredPermissions]);
             })
           });
+          return;
         }
 
         if (method === 'tools/call') {
@@ -240,22 +243,25 @@ class BacklogMCPServer {
           // Check permissions
           const requiredPermissions = TOOL_PERMISSIONS[name as keyof typeof TOOL_PERMISSIONS] || [];
           if (!authManager.hasPermission(authToken, [...requiredPermissions])) {
-            return res.status(403).json({ error: 'Insufficient permissions for this tool' });
+            res.status(403).json({ error: 'Insufficient permissions for this tool' });
+            return;
           }
 
           if (!allHandlers[name as keyof typeof allHandlers]) {
-            return res.status(404).json({ error: `Unknown tool: ${name}` });
+            res.status(404).json({ error: `Unknown tool: ${name}` });
+            return;
           }
 
           const handler = allHandlers[name as keyof typeof allHandlers];
           const result = await handler(args);
           
-          return res.json({
+          res.json({
             content: [{
               type: 'text',
               text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
             }]
           });
+          return;
         }
 
         res.status(400).json({ error: 'Unsupported method' });
@@ -269,11 +275,12 @@ class BacklogMCPServer {
     });
 
     // Admin endpoints (master token only)
-    apiRouter.post('/admin/generate-token', authMiddleware, (req, res) => {
+    apiRouter.post('/admin/generate-token', authMiddleware, (req, res): void => {
       const authToken = (req as any).authToken;
       
       if (authToken.type !== 'master') {
-        return res.status(403).json({ error: 'Master token required' });
+        res.status(403).json({ error: 'Master token required' });
+        return;
       }
 
       const { type, expiresIn, description } = req.body;
@@ -288,11 +295,12 @@ class BacklogMCPServer {
       }
     });
 
-    apiRouter.post('/admin/revoke-token', authMiddleware, (req, res) => {
+    apiRouter.post('/admin/revoke-token', authMiddleware, (req, res): void => {
       const authToken = (req as any).authToken;
       
       if (authToken.type !== 'master') {
-        return res.status(403).json({ error: 'Master token required' });
+        res.status(403).json({ error: 'Master token required' });
+        return;
       }
 
       const { token } = req.body;
@@ -301,11 +309,12 @@ class BacklogMCPServer {
       res.json({ revoked });
     });
 
-    apiRouter.get('/admin/tokens', authMiddleware, (req, res) => {
+    apiRouter.get('/admin/tokens', authMiddleware, (req, res): void => {
       const authToken = (req as any).authToken;
       
       if (authToken.type !== 'master') {
-        return res.status(403).json({ error: 'Master token required' });
+        res.status(403).json({ error: 'Master token required' });
+        return;
       }
 
       const tokens = authManager.listTokens();

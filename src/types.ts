@@ -115,7 +115,7 @@ export const TOOL_PERMISSIONS = {
 } as const;
 
 // Permission sets for different token types
-export const PERMISSION_SETS = {
+export const PERMISSION_SETS: Record<string, string[]> = {
   master: [
     'diagrams:read', 'diagrams:write',
     'projects:read', 'projects:write',
@@ -141,8 +141,8 @@ export const PERMISSION_SETS = {
     'actors:read',
     'utilities:read'
   ]
-} as const;
+};
 
 export type ToolName = keyof typeof TOOL_PERMISSIONS;
-export type Permission = typeof PERMISSION_SETS.master[number];
-export type TokenType = keyof typeof PERMISSION_SETS;
+export type Permission = string;
+export type TokenType = 'master' | 'team' | 'readonly';
