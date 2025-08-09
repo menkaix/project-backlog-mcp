@@ -185,9 +185,16 @@ class BacklogMCPServer {
       return {
         protocolVersion: "2024-11-05",
         capabilities: {
-          tools: {},
-          resources: {},
-          prompts: {},
+          tools: {
+            listChanged: false
+          },
+          resources: {
+            subscribe: false,
+            listChanged: false
+          },
+          prompts: {
+            listChanged: false
+          },
           logging: {}
         },
         serverInfo: {
@@ -532,9 +539,16 @@ class BacklogMCPServer {
           res.json({
             protocolVersion: "2024-11-05",
             capabilities: {
-              tools: {},
-              resources: {},
-              prompts: {},
+              tools: {
+                listChanged: false
+              },
+              resources: {
+                subscribe: false,
+                listChanged: false
+              },
+              prompts: {
+                listChanged: false
+              },
               logging: {}
             },
             serverInfo: {
