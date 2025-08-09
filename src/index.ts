@@ -24,11 +24,12 @@ import { setupActorTools } from './tools/actors.js';
 import { setupUtilityTools } from './tools/utilities.js';
 
 // Environment variables
-const HYPERMANAGER_API_KEY = process.env.HYPERMANAGER_API_KEY;
-const MCP_SERVER_SECRET = process.env.MCP_SERVER_SECRET || 'default-secret-change-me';
-const ALLOWED_TOKENS = process.env.ALLOWED_TOKENS?.split(',') || [];
-const PORT = parseInt(process.env.PORT || '3000');
-const NODE_ENV = process.env.NODE_ENV || 'development';
+const HYPERMANAGER_API_KEY = process.env['HYPERMANAGER_API_KEY'];
+const MCP_SERVER_SECRET = process.env['MCP_SERVER_SECRET'] || 'default-secret-change-me';
+const ALLOWED_TOKENS = process.env['ALLOWED_TOKENS']?.split(',') || [];
+const PORT = parseInt(process.env['PORT'] || '3000');
+const NODE_ENV = process.env['NODE_ENV'] || 'development';
+const BASE_PATH = process.env['BASE_PATH'] || '';
 
 // Validate required environment variables
 if (!HYPERMANAGER_API_KEY) {
@@ -86,7 +87,7 @@ const allHandlers = {
 
 class BacklogMCPServer {
   private server: Server;
-  private expressApp: express.Application;
+  private expressApp!: express.Application;
 
   constructor() {
     this.server = new Server(
@@ -171,7 +172,7 @@ class BacklogMCPServer {
     // Security middleware
     this.expressApp.use(helmet());
     this.expressApp.use(cors({
-      origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+      origin: process.env['ALLOWED_ORIGINS']?.split(',') || '*',
       credentials: true
     }));
 
@@ -187,11 +188,14 @@ class BacklogMCPServer {
 
     this.expressApp.use(express.json({ limit: '10mb' }));
 
+    // Create router for all API routes
+    const apiRouter = express.Router();
+
     // Auth middleware for API routes
     const authMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
       const token = req.headers.authorization?.replace('Bearer ', '') || 
                    req.headers['x-auth-token'] as string ||
-                   req.query.token as string;
+                   req.query['token'] as string;
 
       if (!token) {
         return res.status(401).json({ error: 'Authentication token required' });
@@ -207,7 +211,7 @@ class BacklogMCPServer {
     };
 
     // Health check
-    this.expressApp.get('/health', (req, res) => {
+    apiRouter.get('/health', (req, res) => {
       res.json({ 
         status: 'healthy', 
         timestamp: new Date().toISOString(),
@@ -216,7 +220,7 @@ class BacklogMCPServer {
     });
 
     // MCP endpoint for HTTP transport
-    this.expressApp.post('/mcp', authMiddleware, async (req, res) => {
+    apiRouter.post('/mcp', authMiddleware, async (req, res) => {
       try {
         const { method, params } = req.body;
         const authToken = (req as any).authToken;
@@ -225,7 +229,7 @@ class BacklogMCPServer {
           return res.json({
             tools: allTools.filter(tool => {
               const requiredPermissions = TOOL_PERMISSIONS[tool.name as keyof typeof TOOL_PERMISSIONS] || [];
-              return authManager.hasPermission(authToken, requiredPermissions);
+              return authManager.hasPermission(authToken, [...requiredPermissions]);
             })
           });
         }
@@ -235,7 +239,7 @@ class BacklogMCPServer {
           
           // Check permissions
           const requiredPermissions = TOOL_PERMISSIONS[name as keyof typeof TOOL_PERMISSIONS] || [];
-          if (!authManager.hasPermission(authToken, requiredPermissions)) {
+          if (!authManager.hasPermission(authToken, [...requiredPermissions])) {
             return res.status(403).json({ error: 'Insufficient permissions for this tool' });
           }
 
@@ -265,7 +269,7 @@ class BacklogMCPServer {
     });
 
     // Admin endpoints (master token only)
-    this.expressApp.post('/admin/generate-token', authMiddleware, (req, res) => {
+    apiRouter.post('/admin/generate-token', authMiddleware, (req, res) => {
       const authToken = (req as any).authToken;
       
       if (authToken.type !== 'master') {
@@ -284,7 +288,7 @@ class BacklogMCPServer {
       }
     });
 
-    this.expressApp.post('/admin/revoke-token', authMiddleware, (req, res) => {
+    apiRouter.post('/admin/revoke-token', authMiddleware, (req, res) => {
       const authToken = (req as any).authToken;
       
       if (authToken.type !== 'master') {
@@ -297,7 +301,7 @@ class BacklogMCPServer {
       res.json({ revoked });
     });
 
-    this.expressApp.get('/admin/tokens', authMiddleware, (req, res) => {
+    apiRouter.get('/admin/tokens', authMiddleware, (req, res) => {
       const authToken = (req as any).authToken;
       
       if (authToken.type !== 'master') {
@@ -307,6 +311,9 @@ class BacklogMCPServer {
       const tokens = authManager.listTokens();
       res.json({ tokens });
     });
+
+    // Mount the router with BASE_PATH
+    this.expressApp.use(BASE_PATH, apiRouter);
   }
 
   async runStdio() {
@@ -318,14 +325,14 @@ class BacklogMCPServer {
   async runHttp() {
     this.expressApp.listen(PORT, () => {
       logger.info(`Backlog MCP server running on HTTP port ${PORT}`);
-      logger.info(`Health check: http://localhost:${PORT}/health`);
-      logger.info(`MCP endpoint: http://localhost:${PORT}/mcp`);
+      logger.info(`Health check: http://localhost:${PORT}${BASE_PATH}/health`);
+      logger.info(`MCP endpoint: http://localhost:${PORT}${BASE_PATH}/mcp`);
     });
   }
 
   async run() {
     // Check if we're running in Railway or similar cloud environment
-    if (process.env.PORT || process.env.RAILWAY_ENVIRONMENT) {
+    if (process.env['PORT'] || process.env['RAILWAY_ENVIRONMENT']) {
       await this.runHttp();
     } else {
       await this.runStdio();

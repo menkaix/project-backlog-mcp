@@ -61,17 +61,45 @@ A Model Context Protocol (MCP) server that provides access to the HyperManager P
 2. Create a new API key
 3. Copy the key for later use
 
-### 2. Deploy to Railway
+### 2. Deploy on VPS with Docker Compose
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/your-template-id)
+1. Clone the repository on your VPS:
 
-1. Click the "Deploy on Railway" button above
-2. Connect your GitHub account
-3. Fork this repository
-4. Set the following environment variables in Railway:
-   - `HYPERMANAGER_API_KEY`: Your HyperManager API key
-   - `MCP_SERVER_SECRET`: A secure random string for JWT signing
-   - `ALLOWED_TOKENS`: Comma-separated list of initial access tokens
+```bash
+git clone https://github.com/your-username/project-backlog-mcp.git
+cd project-backlog-mcp
+```
+
+2. Copy and configure environment variables:
+
+```bash
+cp .env.example .env
+```
+
+3. Edit `.env` with your configuration:
+
+```env
+HYPERMANAGER_API_KEY=your-api-key-here
+MCP_SERVER_SECRET=your-secure-jwt-secret-here
+ALLOWED_TOKENS=token1,token2,token3
+HOST=0.0.0.0
+PORT=3000
+NODE_ENV=production
+ALLOWED_ORIGINS=https://yourdomain.com
+```
+
+4. Build and start the service:
+
+```bash
+docker-compose up -d
+```
+
+5. Verify the deployment:
+
+```bash
+docker-compose logs -f mcp-server
+curl http://localhost:3000/backlog-mcp/health
+```
 
 ### 3. Generate Access Tokens
 
@@ -79,13 +107,13 @@ After deployment, generate tokens for accessing your server:
 
 ```bash
 # Generate a master token (full access)
-npm run generate-token -- --type master --description "Master access token"
+docker-compose exec mcp-server npm run generate-token -- --type master --description "Master access token"
 
 # Generate a team token (limited access)
-npm run generate-token -- --type team --expires 30d --description "Team access token"
+docker-compose exec mcp-server npm run generate-token -- --type team --expires 30d --description "Team access token"
 
 # Generate a readonly token
-npm run generate-token -- --type readonly --expires 7d --description "Read-only access"
+docker-compose exec mcp-server npm run generate-token -- --type readonly --expires 7d --description "Read-only access"
 ```
 
 ### 4. Configure Your MCP Client
@@ -99,7 +127,7 @@ Add the server to your MCP client configuration:
       "command": "npx",
       "args": [
         "@modelcontextprotocol/client-http",
-        "https://your-app.railway.app/mcp"
+        "https://yourdomain.com/backlog-mcp/mcp"
       ],
       "env": {
         "MCP_AUTH_TOKEN": "your-generated-token-here"
@@ -107,6 +135,47 @@ Add the server to your MCP client configuration:
     }
   }
 }
+```
+
+## Docker Compose Management
+
+### Common Commands
+
+```bash
+# Start the service
+docker-compose up -d
+
+# Stop the service
+docker-compose down
+
+# View logs
+docker-compose logs -f mcp-server
+
+# Restart the service
+docker-compose restart mcp-server
+
+# Rebuild and restart
+docker-compose up -d --build
+
+# Check service status
+docker-compose ps
+
+# Execute commands in the container
+docker-compose exec mcp-server npm run generate-token -- --type master
+```
+
+### Updates and Maintenance
+
+```bash
+# Pull latest changes
+git pull origin main
+
+# Rebuild and restart with new code
+docker-compose down
+docker-compose up -d --build
+
+# View container resource usage
+docker stats project-backlog-mcp
 ```
 
 ## Local Development
@@ -202,13 +271,13 @@ Master tokens can access admin endpoints:
 ### Health Check
 
 ```
-GET /health
+GET /backlog-mcp/health
 ```
 
 ### MCP Endpoint
 
 ```
-POST /mcp
+POST /backlog-mcp/mcp
 Authorization: Bearer <token>
 
 {
@@ -220,7 +289,7 @@ Authorization: Bearer <token>
 ### Tool Call Example
 
 ```bash
-curl -X POST https://your-app.railway.app/mcp \
+curl -X POST https://yourdomain.com/backlog-mcp/mcp \
   -H "Authorization: Bearer your-token" \
   -H "Content-Type: application/json" \
   -d '{
@@ -232,9 +301,42 @@ curl -X POST https://your-app.railway.app/mcp \
   }'
 ```
 
+### Admin Endpoints
+
+With BASE_PATH configured, admin endpoints are available at:
+
+- `POST /backlog-mcp/admin/generate-token` - Generate new tokens
+- `POST /backlog-mcp/admin/revoke-token` - Revoke existing tokens
+- `GET /backlog-mcp/admin/tokens` - List active tokens
+
 ## Deployment Options
 
-### Railway (Recommended)
+### VPS with Docker Compose (Recommended)
+
+The easiest way to deploy on your own VPS with nginx already configured:
+
+1. Clone the repository on your VPS
+2. Configure environment variables in `.env`
+3. Run `docker-compose up -d`
+4. Configure nginx to proxy to `localhost:3000/backlog-mcp`
+
+**Nginx Configuration Example:**
+
+```nginx
+location /backlog-mcp/ {
+    proxy_pass http://localhost:3000/backlog-mcp/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Port $server_port;
+}
+```
+
+See the "Deploy on VPS with Docker Compose" section above for detailed instructions.
+
+### Railway
 
 1. Connect your GitHub repository to Railway
 2. Set environment variables
@@ -255,7 +357,7 @@ curl -X POST https://your-app.railway.app/mcp \
 3. Configure `fly.toml`
 4. Deploy with `fly deploy`
 
-### Docker
+### Docker (Manual)
 
 ```bash
 # Build image
