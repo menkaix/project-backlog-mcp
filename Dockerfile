@@ -17,6 +17,9 @@ COPY src/ ./src/
 # Build the application
 RUN npm run build
 
+# Copy scripts after build (so dist/ directory exists for imports)
+COPY scripts/ ./scripts/
+
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S mcp -u 1001
