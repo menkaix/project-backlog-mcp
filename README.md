@@ -496,6 +496,17 @@ location /backlog-mcp/ {
 }
 ```
 
+**⚠️ Important for Reverse Proxy Setup**: If you're deploying behind nginx or another reverse proxy, you need to configure the server to properly handle X-Forwarded-For headers. Add these variables to your `.env`:
+
+```env
+# Proxy Configuration
+TRUST_PROXY=true
+TRUSTED_PROXIES=192.168.1.100,10.0.0.1  # IPs of your proxy servers
+PROXY_HOPS=1
+```
+
+See the detailed [Proxy Configuration Guide](docs/PROXY_CONFIGURATION.md) for complete setup instructions.
+
 See the "Deploy on VPS with Docker Compose" section above for detailed instructions.
 
 ### Railway

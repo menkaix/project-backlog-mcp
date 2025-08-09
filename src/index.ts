@@ -40,6 +40,11 @@ const PORT = parseInt(process.env['PORT'] || '3000');
 const NODE_ENV = process.env['NODE_ENV'] || 'development';
 const BASE_PATH = process.env['BASE_PATH'] || '';
 
+// Proxy configuration
+const TRUST_PROXY = process.env['TRUST_PROXY'] === 'true';
+const TRUSTED_PROXIES = process.env['TRUSTED_PROXIES']?.split(',').filter(ip => ip.trim()) || [];
+const PROXY_HOPS = parseInt(process.env['PROXY_HOPS'] || '1');
+
 // Validate required environment variables
 if (!HYPERMANAGER_API_KEY) {
   throw new Error('HYPERMANAGER_API_KEY environment variable is required');
@@ -72,7 +77,10 @@ logger.info('Environment Configuration:', {
   HYPERMANAGER_API_KEY: HYPERMANAGER_API_KEY ? `${HYPERMANAGER_API_KEY.substring(0, 10)}...` : 'NOT SET',
   MCP_SERVER_SECRET: MCP_SERVER_SECRET ? `${MCP_SERVER_SECRET.substring(0, 10)}...` : 'NOT SET',
   ALLOWED_TOKENS_COUNT: ALLOWED_TOKENS.length,
-  ALLOWED_ORIGINS: process.env['ALLOWED_ORIGINS'] || 'NOT SET'
+  ALLOWED_ORIGINS: process.env['ALLOWED_ORIGINS'] || 'NOT SET',
+  TRUST_PROXY: TRUST_PROXY,
+  TRUSTED_PROXIES: TRUSTED_PROXIES.length > 0 ? TRUSTED_PROXIES : 'ALL (not recommended for production)',
+  PROXY_HOPS: PROXY_HOPS
 });
 
 // Initialize clients
@@ -339,6 +347,81 @@ class BacklogMCPServer {
   private setupExpressApp() {
     this.expressApp = express();
 
+    // Configure proxy trust settings
+    if (TRUST_PROXY) {
+      if (TRUSTED_PROXIES.length > 0) {
+        // Trust specific proxy IPs
+        this.expressApp.set('trust proxy', TRUSTED_PROXIES);
+        logger.info('Proxy Trust Configuration:', {
+          mode: 'specific_ips',
+          trustedProxies: TRUSTED_PROXIES,
+          hops: PROXY_HOPS
+        });
+      } else {
+        // Trust all proxies (not recommended for production)
+        this.expressApp.set('trust proxy', PROXY_HOPS);
+        logger.warn('Proxy Trust Configuration:', {
+          mode: 'trust_all',
+          message: 'Trusting all proxies - not recommended for production',
+          hops: PROXY_HOPS
+        });
+      }
+    } else {
+      logger.info('Proxy Trust Configuration:', {
+        mode: 'disabled',
+        message: 'Not behind a proxy - direct connections only'
+      });
+    }
+
+    // Proxy headers middleware - extract real client information
+    this.expressApp.use((req, res, next) => {
+      if (TRUST_PROXY) {
+        // Log proxy headers for debugging
+        const proxyHeaders = {
+          'x-forwarded-for': req.headers['x-forwarded-for'],
+          'x-forwarded-proto': req.headers['x-forwarded-proto'],
+          'x-forwarded-host': req.headers['x-forwarded-host'],
+          'x-real-ip': req.headers['x-real-ip'],
+          'cf-connecting-ip': req.headers['cf-connecting-ip'], // Cloudflare
+          'x-client-ip': req.headers['x-client-ip']
+        };
+
+        // Filter out undefined headers
+        const definedProxyHeaders = Object.fromEntries(
+          Object.entries(proxyHeaders).filter(([_, value]) => value !== undefined)
+        );
+
+        if (Object.keys(definedProxyHeaders).length > 0) {
+          logger.debug('Proxy Headers Detected:', {
+            requestId: (req as any).requestId || 'unknown',
+            proxyHeaders: definedProxyHeaders,
+            clientIP: req.ip,
+            remoteAddress: req.connection.remoteAddress
+          });
+        }
+
+        // Store original IP information for logging
+        (req as any).clientInfo = {
+          ip: req.ip, // This will be the real client IP after trust proxy is configured
+          originalIP: req.connection.remoteAddress, // This will be the proxy IP
+          forwardedFor: req.headers['x-forwarded-for'],
+          realIP: req.headers['x-real-ip'],
+          protocol: req.headers['x-forwarded-proto'] || req.protocol,
+          host: req.headers['x-forwarded-host'] || req.get('host')
+        };
+      } else {
+        // Direct connection - no proxy
+        (req as any).clientInfo = {
+          ip: req.connection.remoteAddress,
+          originalIP: req.connection.remoteAddress,
+          protocol: req.protocol,
+          host: req.get('host')
+        };
+      }
+
+      next();
+    });
+
     // Request logging middleware
     this.expressApp.use((req, res, next) => {
       const requestId = uuidv4();
@@ -347,7 +430,8 @@ class BacklogMCPServer {
       // Add request ID to request object
       (req as any).requestId = requestId;
       
-      // Log incoming request
+      // Log incoming request with enhanced client information
+      const clientInfo = (req as any).clientInfo;
       logger.info('Incoming Request', {
         requestId,
         method: req.method,
@@ -362,7 +446,15 @@ class BacklogMCPServer {
           'origin': req.headers.origin,
           'referer': req.headers.referer
         },
-        ip: req.ip || req.connection.remoteAddress,
+        client: {
+          ip: clientInfo.ip,
+          originalIP: clientInfo.originalIP,
+          forwardedFor: clientInfo.forwardedFor,
+          realIP: clientInfo.realIP,
+          protocol: clientInfo.protocol,
+          host: clientInfo.host,
+          behindProxy: TRUST_PROXY
+        },
         body: req.method === 'POST' ? (req.body || 'No body yet') : undefined
       });
 
