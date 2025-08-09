@@ -554,7 +554,7 @@ class BacklogMCPServer {
             protocolVersion: negotiatedVersion,
             capabilities: {
               tools: {
-                listChanged: false
+                listChanged: true
               },
               resources: {
                 subscribe: false,
