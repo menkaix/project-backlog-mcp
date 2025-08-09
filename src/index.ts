@@ -211,6 +211,18 @@ class BacklogMCPServer {
       };
     });
 
+    // Initialized handler - Called by client after successful initialization
+    this.server.setRequestHandler({ method: 'initialized' } as any, async (request) => {
+      logger.info('MCP Initialized Notification:', {
+        clientInfo: request.params?.clientInfo,
+        timestamp: new Date().toISOString()
+      });
+
+      // The initialized notification typically doesn't return a response
+      // It's a one-way notification from client to server
+      return {};
+    });
+
     // Resources handlers
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
       logger.debug('Listing available resources');
@@ -570,6 +582,20 @@ class BacklogMCPServer {
         };
       }
 
+      if (method === 'initialized') {
+        logger.info('MCP Initialized Notification (HTTP):', {
+          requestId,
+          clientInfo: params?.clientInfo,
+          timestamp: new Date().toISOString(),
+          tokenId: authToken.id,
+          tokenType: authToken.type
+        });
+
+        // The initialized notification typically doesn't return a response
+        // It's a one-way notification from client to server
+        return { result: {} };
+      }
+
       if (method === 'tools/list') {
         logger.debug('Processing tools/list request', { requestId });
         
@@ -788,7 +814,7 @@ class BacklogMCPServer {
       logger.warn('Unsupported MCP Method', {
         requestId,
         method,
-        supportedMethods: ['initialize', 'tools/list', 'tools/call', 'resources/list', 'resources/read', 'prompts/list', 'prompts/get']
+        supportedMethods: ['initialize', 'initialized', 'tools/list', 'tools/call', 'resources/list', 'resources/read', 'prompts/list', 'prompts/get']
       });
       
       throw new Error('Unsupported method');

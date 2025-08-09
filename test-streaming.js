@@ -98,19 +98,35 @@ function testStreamingEndpoint() {
     
     req.write(initMessage);
     
-    // Wait a bit then send tools/list
+    // Wait a bit then send initialized notification
     setTimeout(() => {
-      console.log('📤 Sending tools/list message...');
-      const toolsMessage = JSON.stringify({
-        method: 'tools/list'
+      console.log('📤 Sending initialized notification...');
+      const initializedMessage = JSON.stringify({
+        method: 'initialized',
+        params: {
+          clientInfo: {
+            name: 'streaming-test-client',
+            version: '1.0.0'
+          }
+        }
       }) + '\n';
       
-      req.write(toolsMessage);
+      req.write(initializedMessage);
       
-      // End the request after another short delay
+      // Wait a bit then send tools/list
       setTimeout(() => {
-        console.log('📤 Ending request...');
-        req.end();
+        console.log('📤 Sending tools/list message...');
+        const toolsMessage = JSON.stringify({
+          method: 'tools/list'
+        }) + '\n';
+        
+        req.write(toolsMessage);
+        
+        // End the request after another short delay
+        setTimeout(() => {
+          console.log('📤 Ending request...');
+          req.end();
+        }, 1000);
       }, 1000);
     }, 1000);
   });
@@ -126,11 +142,11 @@ async function runTest() {
     console.log('🎉 Test completed successfully!');
     console.log(`✅ Messages exchanged: ${result.messageCount}`);
     
-    if (result.messageCount >= 2) {
+    if (result.messageCount >= 3) {
       console.log('✅ Streaming protocol working correctly');
       console.log('✅ Ready for n8n integration');
     } else {
-      console.log('⚠️  Expected at least 2 messages (initialize + tools/list)');
+      console.log('⚠️  Expected at least 3 messages (initialize + initialized + tools/list)');
     }
     
   } catch (error) {
