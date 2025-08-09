@@ -1,6 +1,25 @@
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
+import winston from 'winston';
 import { AuthToken, JWTPayload, TokenType, PERMISSION_SETS } from './types.js';
+
+// Setup logging for auth manager
+const logger = winston.createLogger({
+  level: process.env['NODE_ENV'] === 'development' ? 'debug' : 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.errors({ stack: true }),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      )
+    })
+  ]
+});
 
 export class AuthManager {
   private tokens: Map<string, AuthToken> = new Map();
@@ -9,6 +28,11 @@ export class AuthManager {
 
   constructor(secret: string, initialTokens: string[] = []) {
     this.secret = secret;
+    
+    logger.info('AuthManager Initializing:', {
+      secretLength: secret.length,
+      initialTokensCount: initialTokens.length
+    });
     
     // Add initial static tokens if provided
     initialTokens.forEach((token, index) => {
@@ -20,6 +44,18 @@ export class AuthManager {
         description: `Initial static token ${index + 1}`
       };
       this.tokens.set(token, authToken);
+      
+      logger.debug('Static Token Added:', {
+        tokenId: authToken.id,
+        tokenType: authToken.type,
+        permissions: authToken.permissions,
+        tokenPrefix: token.substring(0, 10) + '...'
+      });
+    });
+    
+    logger.info('AuthManager Initialized:', {
+      totalTokens: this.tokens.size,
+      masterPermissions: PERMISSION_SETS['master'] || []
     });
   }
 
@@ -60,8 +96,18 @@ export class AuthManager {
   }
 
   verifyToken(token: string): AuthToken | null {
+    const tokenPrefix = token.substring(0, 10) + '...';
+    
+    logger.debug('Token Verification Started:', {
+      tokenPrefix,
+      tokenLength: token.length,
+      isRevoked: this.revokedTokens.has(token),
+      isStatic: this.tokens.has(token)
+    });
+
     // Check if token is revoked
     if (this.revokedTokens.has(token)) {
+      logger.warn('Token Verification Failed - Revoked:', { tokenPrefix });
       return null;
     }
 
@@ -69,25 +115,64 @@ export class AuthManager {
     if (this.tokens.has(token)) {
       const authToken = this.tokens.get(token)!;
       
+      logger.debug('Static Token Found:', {
+        tokenPrefix,
+        tokenId: authToken.id,
+        tokenType: authToken.type,
+        expiresAt: authToken.expiresAt,
+        isExpired: authToken.expiresAt ? authToken.expiresAt < new Date() : false
+      });
+      
       // Check expiration
       if (authToken.expiresAt && authToken.expiresAt < new Date()) {
+        logger.warn('Token Verification Failed - Expired:', {
+          tokenPrefix,
+          tokenId: authToken.id,
+          expiresAt: authToken.expiresAt
+        });
         this.tokens.delete(token);
         return null;
       }
 
       // Update last used
       authToken.lastUsed = new Date();
+      
+      logger.info('Token Verification Successful - Static:', {
+        tokenPrefix,
+        tokenId: authToken.id,
+        tokenType: authToken.type,
+        permissions: authToken.permissions
+      });
+      
       return authToken;
     }
 
     // Try to verify as JWT
     try {
+      logger.debug('Attempting JWT Verification:', { tokenPrefix });
+      
       const payload = jwt.verify(token, this.secret) as JWTPayload;
+      
+      logger.debug('JWT Verification Successful:', {
+        tokenPrefix,
+        tokenId: payload.tokenId,
+        tokenType: payload.type,
+        permissions: payload.permissions,
+        iat: payload.iat,
+        exp: payload.exp
+      });
       
       // Check if we have the token in our store
       if (this.tokens.has(token)) {
         const authToken = this.tokens.get(token)!;
         authToken.lastUsed = new Date();
+        
+        logger.info('Token Verification Successful - JWT (Stored):', {
+          tokenPrefix,
+          tokenId: authToken.id,
+          tokenType: authToken.type
+        });
+        
         return authToken;
       }
 
@@ -104,8 +189,23 @@ export class AuthManager {
         authToken.expiresAt = new Date(payload.exp * 1000);
       }
 
+      logger.info('Token Verification Successful - JWT (New):', {
+        tokenPrefix,
+        tokenId: authToken.id,
+        tokenType: authToken.type,
+        permissions: authToken.permissions,
+        expiresAt: authToken.expiresAt
+      });
+
       return authToken;
     } catch (error) {
+      logger.warn('Token Verification Failed - JWT Error:', {
+        tokenPrefix,
+        error: error instanceof Error ? {
+          message: error.message,
+          name: error.name
+        } : error
+      });
       return null;
     }
   }

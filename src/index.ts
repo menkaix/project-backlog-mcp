@@ -12,6 +12,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import winston from 'winston';
+import { v4 as uuidv4 } from 'uuid';
 
 import { HyperManagerAPIClient } from './api-client.js';
 import { AuthManager } from './auth.js';
@@ -54,6 +55,18 @@ const logger = winston.createLogger({
   ]
 });
 
+// Log startup configuration
+logger.info('=== Backlog MCP Server Starting ===');
+logger.info('Environment Configuration:', {
+  NODE_ENV,
+  PORT,
+  BASE_PATH: BASE_PATH || '(none)',
+  HYPERMANAGER_API_KEY: HYPERMANAGER_API_KEY ? `${HYPERMANAGER_API_KEY.substring(0, 10)}...` : 'NOT SET',
+  MCP_SERVER_SECRET: MCP_SERVER_SECRET ? `${MCP_SERVER_SECRET.substring(0, 10)}...` : 'NOT SET',
+  ALLOWED_TOKENS_COUNT: ALLOWED_TOKENS.length,
+  ALLOWED_ORIGINS: process.env['ALLOWED_ORIGINS'] || 'NOT SET'
+});
+
 // Initialize clients
 const apiClient = new HyperManagerAPIClient(HYPERMANAGER_API_KEY);
 const authManager = new AuthManager(MCP_SERVER_SECRET, ALLOWED_TOKENS);
@@ -84,6 +97,36 @@ const allHandlers = {
   ...actorTools.handlers,
   ...utilityTools.handlers
 };
+
+// Log tools setup
+logger.info('Tools Setup Complete:', {
+  totalTools: allTools.length,
+  toolNames: allTools.map(t => t.name),
+  handlerCount: Object.keys(allHandlers).length
+});
+
+// Global error handlers
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', {
+    error: {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    }
+  });
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection:', {
+    reason: reason instanceof Error ? {
+      message: reason.message,
+      stack: reason.stack,
+      name: reason.name
+    } : reason,
+    promise: promise.toString()
+  });
+});
 
 class BacklogMCPServer {
   private server: Server;
@@ -169,6 +212,61 @@ class BacklogMCPServer {
   private setupExpressApp() {
     this.expressApp = express();
 
+    // Request logging middleware
+    this.expressApp.use((req, res, next) => {
+      const requestId = uuidv4();
+      const startTime = Date.now();
+      
+      // Add request ID to request object
+      (req as any).requestId = requestId;
+      
+      // Log incoming request
+      logger.info('Incoming Request', {
+        requestId,
+        method: req.method,
+        url: req.url,
+        path: req.path,
+        query: req.query,
+        headers: {
+          'user-agent': req.headers['user-agent'],
+          'content-type': req.headers['content-type'],
+          'authorization': req.headers.authorization ? 'Bearer [REDACTED]' : undefined,
+          'x-auth-token': req.headers['x-auth-token'] ? '[REDACTED]' : undefined,
+          'origin': req.headers.origin,
+          'referer': req.headers.referer
+        },
+        ip: req.ip || req.connection.remoteAddress,
+        body: req.method === 'POST' ? (req.body || 'No body yet') : undefined
+      });
+
+      // Override res.json to log responses
+      const originalJson = res.json;
+      res.json = function(body) {
+        const duration = Date.now() - startTime;
+        logger.info('Response Sent', {
+          requestId,
+          statusCode: res.statusCode,
+          duration: `${duration}ms`,
+          body: typeof body === 'object' ? JSON.stringify(body, null, 2) : body
+        });
+        return originalJson.call(this, body);
+      };
+
+      // Log response completion
+      res.on('finish', () => {
+        const duration = Date.now() - startTime;
+        logger.info('Request Completed', {
+          requestId,
+          method: req.method,
+          url: req.url,
+          statusCode: res.statusCode,
+          duration: `${duration}ms`
+        });
+      });
+
+      next();
+    });
+
     // Security middleware
     this.expressApp.use(helmet());
     this.expressApp.use(cors({
@@ -176,37 +274,93 @@ class BacklogMCPServer {
       credentials: true
     }));
 
-    // Rate limiting
+    // Rate limiting with logging
     const limiter = rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes
       max: 100, // limit each IP to 100 requests per windowMs
       message: 'Too many requests from this IP, please try again later.',
       standardHeaders: true,
       legacyHeaders: false,
+      handler: (req, res) => {
+        logger.warn('Rate Limit Exceeded', {
+          requestId: (req as any).requestId,
+          ip: req.ip || req.connection.remoteAddress,
+          method: req.method,
+          url: req.url
+        });
+        res.status(429).json({ error: 'Too many requests from this IP, please try again later.' });
+      }
     });
     this.expressApp.use(limiter);
 
     this.expressApp.use(express.json({ limit: '10mb' }));
+
+    // JSON parsing error handler
+    this.expressApp.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (error instanceof SyntaxError && 'body' in error) {
+        logger.error('JSON Parse Error', {
+          requestId: (req as any).requestId,
+          error: error.message,
+          body: req.body
+        });
+        res.status(400).json({ error: 'Invalid JSON in request body' });
+        return;
+      }
+      next(error);
+    });
 
     // Create router for all API routes
     const apiRouter = express.Router();
 
     // Auth middleware for API routes
     const authMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction): void => {
+      const requestId = (req as any).requestId;
+      
+      logger.debug('Authentication Check Started', {
+        requestId,
+        method: req.method,
+        url: req.url,
+        hasAuthHeader: !!req.headers.authorization,
+        hasXAuthToken: !!req.headers['x-auth-token'],
+        hasQueryToken: !!req.query['token']
+      });
+
       const token = req.headers.authorization?.replace('Bearer ', '') || 
                    req.headers['x-auth-token'] as string ||
                    req.query['token'] as string;
 
       if (!token) {
+        logger.warn('Authentication Failed - No Token', {
+          requestId,
+          method: req.method,
+          url: req.url,
+          ip: req.ip || req.connection.remoteAddress
+        });
         res.status(401).json({ error: 'Authentication token required' });
         return;
       }
 
       const authToken = authManager.verifyToken(token);
       if (!authToken) {
+        logger.warn('Authentication Failed - Invalid Token', {
+          requestId,
+          method: req.method,
+          url: req.url,
+          ip: req.ip || req.connection.remoteAddress,
+          tokenPrefix: token.substring(0, 10) + '...'
+        });
         res.status(401).json({ error: 'Invalid or expired token' });
         return;
       }
+
+      logger.info('Authentication Successful', {
+        requestId,
+        tokenId: authToken.id,
+        tokenType: authToken.type,
+        permissions: authToken.permissions,
+        lastUsed: authToken.lastUsed,
+        expiresAt: authToken.expiresAt
+      });
 
       (req as any).authToken = authToken;
       next();
@@ -221,39 +375,131 @@ class BacklogMCPServer {
       });
     });
 
+    // MCP endpoint info for GET requests
+    apiRouter.get('/mcp', (req, res) => {
+      res.json({
+        message: 'MCP Server Endpoint',
+        description: 'This endpoint accepts POST requests for MCP protocol communication',
+        usage: {
+          method: 'POST',
+          contentType: 'application/json',
+          authentication: 'Bearer token required in Authorization header',
+          endpoints: {
+            'tools/list': 'List available tools',
+            'tools/call': 'Call a specific tool'
+          }
+        },
+        healthCheck: `${BASE_PATH}/health`,
+        version: '1.0.0'
+      });
+    });
+
     // MCP endpoint for HTTP transport
     apiRouter.post('/mcp', authMiddleware, async (req, res): Promise<void> => {
+      const requestId = (req as any).requestId;
+      const authToken = (req as any).authToken;
+      
       try {
         const { method, params } = req.body;
-        const authToken = (req as any).authToken;
+        
+        logger.info('MCP Request Processing', {
+          requestId,
+          method,
+          params: params ? JSON.stringify(params, null, 2) : 'No params',
+          tokenId: authToken.id,
+          tokenType: authToken.type
+        });
 
         if (method === 'tools/list') {
-          res.json({
-            tools: allTools.filter(tool => {
-              const requiredPermissions = TOOL_PERMISSIONS[tool.name as keyof typeof TOOL_PERMISSIONS] || [];
-              return authManager.hasPermission(authToken, [...requiredPermissions]);
-            })
+          logger.debug('Processing tools/list request', { requestId });
+          
+          const filteredTools = allTools.filter(tool => {
+            const requiredPermissions = TOOL_PERMISSIONS[tool.name as keyof typeof TOOL_PERMISSIONS] || [];
+            const hasPermission = authManager.hasPermission(authToken, [...requiredPermissions]);
+            
+            logger.debug('Tool Permission Check', {
+              requestId,
+              toolName: tool.name,
+              requiredPermissions,
+              userPermissions: authToken.permissions,
+              hasPermission
+            });
+            
+            return hasPermission;
           });
+          
+          logger.info('Tools List Response', {
+            requestId,
+            totalTools: allTools.length,
+            filteredTools: filteredTools.length,
+            toolNames: filteredTools.map(t => t.name)
+          });
+          
+          res.json({ tools: filteredTools });
           return;
         }
 
         if (method === 'tools/call') {
           const { name, arguments: args } = params;
           
+          logger.info('Tool Call Request', {
+            requestId,
+            toolName: name,
+            arguments: args ? JSON.stringify(args, null, 2) : 'No arguments'
+          });
+          
           // Check permissions
           const requiredPermissions = TOOL_PERMISSIONS[name as keyof typeof TOOL_PERMISSIONS] || [];
-          if (!authManager.hasPermission(authToken, [...requiredPermissions])) {
+          const hasPermission = authManager.hasPermission(authToken, [...requiredPermissions]);
+          
+          logger.debug('Tool Permission Check', {
+            requestId,
+            toolName: name,
+            requiredPermissions,
+            userPermissions: authToken.permissions,
+            hasPermission
+          });
+          
+          if (!hasPermission) {
+            logger.warn('Tool Access Denied - Insufficient Permissions', {
+              requestId,
+              toolName: name,
+              requiredPermissions,
+              userPermissions: authToken.permissions,
+              tokenId: authToken.id
+            });
             res.status(403).json({ error: 'Insufficient permissions for this tool' });
             return;
           }
 
           if (!allHandlers[name as keyof typeof allHandlers]) {
+            logger.error('Tool Not Found', {
+              requestId,
+              toolName: name,
+              availableTools: Object.keys(allHandlers)
+            });
             res.status(404).json({ error: `Unknown tool: ${name}` });
             return;
           }
 
+          logger.info('Executing Tool', {
+            requestId,
+            toolName: name,
+            startTime: new Date().toISOString()
+          });
+
+          const toolStartTime = Date.now();
           const handler = allHandlers[name as keyof typeof allHandlers];
           const result = await handler(args);
+          const toolDuration = Date.now() - toolStartTime;
+          
+          logger.info('Tool Execution Completed', {
+            requestId,
+            toolName: name,
+            duration: `${toolDuration}ms`,
+            resultType: typeof result,
+            resultLength: typeof result === 'string' ? result.length : JSON.stringify(result).length
+          });
           
           res.json({
             content: [{
@@ -264,12 +510,29 @@ class BacklogMCPServer {
           return;
         }
 
+        logger.warn('Unsupported MCP Method', {
+          requestId,
+          method,
+          supportedMethods: ['tools/list', 'tools/call']
+        });
+        
         res.status(400).json({ error: 'Unsupported method' });
       } catch (error) {
-        logger.error('MCP HTTP request error:', error);
+        logger.error('MCP HTTP Request Error', {
+          requestId,
+          error: error instanceof Error ? {
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+          } : error,
+          method: req.body?.method,
+          params: req.body?.params
+        });
+        
         res.status(500).json({ 
           error: 'Internal server error',
-          message: error instanceof Error ? error.message : 'Unknown error'
+          message: error instanceof Error ? error.message : 'Unknown error',
+          requestId
         });
       }
     });
