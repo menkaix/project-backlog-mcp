@@ -5,12 +5,12 @@
  * Tests the new /mcp/stream endpoint for n8n compatibility
  */
 
-const http = require('http');
+import http from 'http';
 
 // Configuration
 const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3000';
 const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || 'test-token';
-const BASE_PATH = process.env.BASE_PATH || '/backlog-mcp';
+const BASE_PATH = process.env.BASE_PATH || '';
 
 console.log('🧪 Testing MCP HTTP Streaming Endpoint');
 console.log(`📍 Server: ${SERVER_URL}${BASE_PATH}/mcp/stream`);

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import 'dotenv/config';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -211,17 +212,8 @@ class BacklogMCPServer {
       };
     });
 
-    // Initialized handler - Called by client after successful initialization
-    this.server.setRequestHandler({ method: 'initialized' } as any, async (request) => {
-      logger.info('MCP Initialized Notification:', {
-        clientInfo: request.params?.clientInfo,
-        timestamp: new Date().toISOString()
-      });
-
-      // The initialized notification typically doesn't return a response
-      // It's a one-way notification from client to server
-      return {};
-    });
+    // Note: The 'initialized' method is handled in HTTP transports via handleMCPMessage
+    // For stdio transport, it's not typically used as initialization is synchronous
 
     // Resources handlers
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
@@ -428,11 +420,19 @@ class BacklogMCPServer {
     });
     this.expressApp.use(limiter);
 
-    this.expressApp.use(express.json({ limit: '10mb' }));
+    // JSON middleware - but skip for streaming endpoint
+    this.expressApp.use((req, res, next) => {
+      if (req.path.endsWith('/mcp/stream')) {
+        // Skip JSON parsing for streaming endpoint
+        next();
+      } else {
+        express.json({ limit: '10mb' })(req, res, next);
+      }
+    });
 
-    // JSON parsing error handler
+    // JSON parsing error handler (only for non-streaming endpoints)
     this.expressApp.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-      if (error instanceof SyntaxError && 'body' in error) {
+      if (error instanceof SyntaxError && 'body' in error && !req.path.endsWith('/mcp/stream')) {
         logger.error('JSON Parse Error', {
           requestId: (req as any).requestId,
           error: error.message,
