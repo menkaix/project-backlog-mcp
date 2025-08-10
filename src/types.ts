@@ -146,3 +146,41 @@ export const PERMISSION_SETS: Record<string, string[]> = {
 export type ToolName = keyof typeof TOOL_PERMISSIONS;
 export type Permission = string;
 export type TokenType = 'master' | 'team' | 'readonly';
+
+// Server-Sent Events types
+export interface SSEConnection {
+  id: string;
+  response: any; // Express Response object
+  authToken: AuthToken;
+  connectedAt: Date;
+  lastActivity: Date;
+  clientInfo?: {
+    userAgent?: string;
+    ip?: string;
+  };
+}
+
+export interface SSEEvent {
+  id?: string;
+  event?: string;
+  data: any;
+  retry?: number;
+}
+
+export type SSEEventType = 
+  | 'mcp-response'
+  | 'mcp-notification' 
+  | 'mcp-error'
+  | 'heartbeat'
+  | 'tool-result'
+  | 'connection-status';
+
+export interface MCPSSEMessage {
+  type: SSEEventType;
+  requestId?: string;
+  method?: string;
+  result?: any;
+  error?: any;
+  timestamp: string;
+  metadata?: Record<string, any>;
+}

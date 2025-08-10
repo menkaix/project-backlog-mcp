@@ -363,6 +363,65 @@ The streaming endpoint:
 - Responds with JSON messages for each request
 - Compatible with n8n's "HTTP Streamable" transport
 
+#### Server-Sent Events (SSE) MCP Endpoints (for real-time communication)
+
+**Establish SSE Connection:**
+
+```
+GET /backlog-mcp/mcp/sse?token=<token>
+Accept: text/event-stream
+Cache-Control: no-cache
+```
+
+**Send MCP Commands via SSE:**
+
+```
+POST /backlog-mcp/mcp/sse/send
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "connectionId": "connection-uuid",
+  "message": {
+    "method": "tools/list"
+  }
+}
+```
+
+**Broadcast to Multiple Connections (Master token only):**
+
+```
+POST /backlog-mcp/mcp/sse/broadcast
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "message": {
+    "type": "mcp-notification",
+    "result": { "message": "Server maintenance in 5 minutes" },
+    "timestamp": "2024-01-01T00:00:00Z"
+  },
+  "filter": {
+    "tokenTypes": ["team", "readonly"]
+  }
+}
+```
+
+**Get SSE Statistics (Master token only):**
+
+```
+GET /backlog-mcp/mcp/sse/stats
+Authorization: Bearer <token>
+```
+
+The SSE endpoints provide:
+
+- **Real-time communication**: Server can push updates to clients
+- **Event-driven architecture**: Different event types (mcp-response, mcp-error, heartbeat, etc.)
+- **Connection management**: Automatic heartbeat and cleanup of stale connections
+- **Broadcasting**: Send messages to multiple clients with filtering
+- **Statistics**: Monitor active connections and usage
+
 **⚠️ Common Mistake**: Do NOT use REST-style endpoints like `/backlog-mcp/tools/list` - these will return 404 errors. All operations must use the MCP endpoints above.
 
 ### List Available Tools

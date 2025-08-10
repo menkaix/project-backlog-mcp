@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Server-Sent Events Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.connecting {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        .event {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-left: 4px solid #007bff;
+            background-color: #f8f9fa;
+        }
+        .event.error {
+            border-left-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        .event.success {
+            border-left-color: #28a745;
+            background-color: #d4edda;
+        }
+        .event.heartbeat {
+            border-left-color: #ffc107;
+            background-color: #fff3cd;
+        }
+        .timestamp {
+            color: #6c757d;
+            font-size: 11px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .stat-label {
+            color: #6c757d;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 MCP Server-Sent Events Demo</h1>
+    
+    <div class="container">
+        <h2>Connection Settings</h2>
+        <div class="form-group">
+            <label for="serverUrl">Server URL:</label>
+            <input type="text" id="serverUrl" value="http://localhost:3000" placeholder="http://localhost:3000">
+        </div>
+        <div class="form-group">
+            <label for="basePath">Base Path:</label>
+            <input type="text" id="basePath" value="" placeholder="/backlog-mcp (optional)">
+        </div>
+        <div class="form-group">
+            <label for="authToken">Auth Token:</label>
+            <input type="password" id="authToken" placeholder="Your MCP auth token">
+        </div>
+        <button id="connectBtn" onclick="connect()">Connect to SSE</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <div class="container">
+        <div id="connectionStatus" class="status disconnected">
+            ❌ Disconnected
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="eventsReceived">0</div>
+                <div class="stat-label">Events Received</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="commandsSent">0</div>
+                <div class="stat-label">Commands Sent</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="connectionTime">--</div>
+                <div class="stat-label">Connected Time</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="lastHeartbeat">--</div>
+                <div class="stat-label">Last Heartbeat</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Send MCP Commands</h2>
+        <div class="form-group">
+            <label for="commandType">Command Type:</label>
+            <select id="commandType" onchange="updateCommandTemplate()">
+                <option value="tools/list">List Tools</option>
+                <option value="tools/call">Call Tool</option>
+                <option value="resources/list">List Resources</option>
+                <option value="resources/read">Read Resource</option>
+                <option value="prompts/list">List Prompts</option>
+                <option value="prompts/get">Get Prompt</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="commandParams">Command Parameters (JSON):</label>
+            <textarea id="commandParams" rows="4" placeholder='{"name": "list_projects", "arguments": {}}'></textarea>
+        </div>
+        <button id="sendCommandBtn" onclick="sendCommand()" disabled>Send Command</button>
+        <button onclick="sendToolsList()">Quick: List Tools</button>
+        <button onclick="sendListProjects()">Quick: List Projects</button>
+    </div>
+
+    <div class="container">
+        <h2>Event Log</h2>
+        <div id="eventLog" class="log"></div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let connectionId = null;
+        let eventsReceived = 0;
+        let commandsSent = 0;
+        let connectionStartTime = null;
+        let connectionTimeInterval = null;
+
+        function getServerUrl() {
+            const serverUrl = document.getElementById('serverUrl').value.trim();
+            const basePath = document.getElementById('basePath').value.trim();
+            return serverUrl + basePath;
+        }
+
+        function getAuthToken() {
+            return document.getElementById('authToken').value.trim();
+        }
+
+        function updateStatus(status, message) {
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.className = `status ${status}`;
+            statusEl.innerHTML = message;
+        }
+
+        function logEvent(type, message, data = null) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEl = document.getElementById('eventLog');
+            
+            let eventClass = '';
+            let icon = '📝';
+            
+            switch(type) {
+                case 'error':
+                    eventClass = 'error';
+                    icon = '❌';
+                    break;
+                case 'success':
+                    eventClass = 'success';
+                    icon = '✅';
+                    break;
+                case 'heartbeat':
+                    eventClass = 'heartbeat';
+                    icon = '💓';
+                    break;
+                case 'connection':
+                    eventClass = 'success';
+                    icon = '🔗';
+                    break;
+                case 'command':
+                    eventClass = '';
+                    icon = '📤';
+                    break;
+                case 'response':
+                    eventClass = 'success';
+                    icon = '📨';
+                    break;
+            }
+            
+            const eventDiv = document.createElement('div');
+            eventDiv.className = `event ${eventClass}`;
+            eventDiv.innerHTML = `
+                <div class="timestamp">${timestamp}</div>
+                <div>${icon} ${message}</div>
+                ${data ? `<pre style="margin-top: 8px; font-size: 11px;">${JSON.stringify(data, null, 2)}</pre>` : ''}
+            `;
+            
+            logEl.appendChild(eventDiv);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function updateStats() {
+            document.getElementById('eventsReceived').textContent = eventsReceived;
+            document.getElementById('commandsSent').textContent = commandsSent;
+            
+            if (connectionStartTime) {
+                const elapsed = Math.floor((Date.now() - connectionStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                document.getElementById('connectionTime').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+
+        function connect() {
+            const serverUrl = getServerUrl();
+            const authToken = getAuthToken();
+            
+            if (!serverUrl || !authToken) {
+                alert('Please enter server URL and auth token');
+                return;
+            }
+            
+            disconnect(); // Close any existing connection
+            
+            updateStatus('connecting', '🔄 Connecting...');
+            logEvent('connection', 'Attempting to connect to SSE endpoint');
+            
+            const sseUrl = `${serverUrl}/mcp/sse?token=${encodeURIComponent(authToken)}`;
+            eventSource = new EventSource(sseUrl);
+            
+            eventSource.onopen = function(event) {
+                updateStatus('connected', '✅ Connected');
+                logEvent('connection', 'SSE connection opened');
+                connectionStartTime = Date.now();
+                
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                document.getElementById('sendCommandBtn').disabled = false;
+                
+                // Start connection time counter
+                connectionTimeInterval = setInterval(updateStats, 1000);
+            };
+            
+            eventSource.onerror = function(event) {
+                logEvent('error', 'SSE connection error', event);
+                if (eventSource.readyState === EventSource.CLOSED) {
+                    updateStatus('disconnected', '❌ Connection closed');
+                    disconnect();
+                }
+            };
+            
+            // Handle different event types
+            eventSource.addEventListener('connection-status', function(event) {
+                const data = JSON.parse(event.data);
+                eventsReceived++;
+                logEvent('connection', 'Connection status received', data);
+                
+                if (data.result && data.result.connectionId) {
+                    connectionId = data.result.connectionId;
+                    logEvent('success', `Connection ID: ${connectionId}`);
+                }
+                updateStats();
+            });
+            
+            eventSource.addEventListener('mcp-notification', function(event) {
+                const data = JSON.parse(event.data);
+                eventsReceived++;
+                logEvent('success', 'MCP notification received', data);
+                
+                if (data.result && data.result.connectionId) {
+                    connectionId = data.result.connectionId;
+                    logEvent('success', `Connection ID: ${connectionId}`);
+                }
+                updateStats();
+            });
+            
+            eventSource.addEventListener('mcp-response', function(event) {
+                const data = JSON.parse(event.data);
+                eventsReceived++;
+                logEvent('response', `MCP response: ${data.method}`, data);
+                updateStats();
+            });
+            
+            eventSource.addEventListener('mcp-error', function(event) {
+                const data = JSON.parse(event.data);
+                eventsReceived++;
+                logEvent('error', `MCP error: ${data.method}`, data);
+                updateStats();
+            });
+            
+            eventSource.addEventListener('heartbeat', function(event) {
+                const data = JSON.parse(event.data);
+                eventsReceived++;
+                document.getElementById('lastHeartbeat').textContent = new Date().toLocaleTimeString();
+                logEvent('heartbeat', 'Heartbeat received', data.metadata);
+                updateStats();
+            });
+            
+            eventSource.addEventListener('tool-result', function(event) {
+                const data = JSON.parse(event.data);
+                eventsReceived++;
+                logEvent('response', 'Tool result received', data);
+                updateStats();
+            });
+        }
+
+        function disconnect() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            
+            if (connectionTimeInterval) {
+                clearInterval(connectionTimeInterval);
+                connectionTimeInterval = null;
+            }
+            
+            updateStatus('disconnected', '❌ Disconnected');
+            logEvent('connection', 'SSE connection closed');
+            
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            document.getElementById('sendCommandBtn').disabled = true;
+            
+            connectionId = null;
+            connectionStartTime = null;
+            document.getElementById('connectionTime').textContent = '--';
+            document.getElementById('lastHeartbeat').textContent = '--';
+        }
+
+        function clearLog() {
+            document.getElementById('eventLog').innerHTML = '';
+            eventsReceived = 0;
+            commandsSent = 0;
+            updateStats();
+        }
+
+        function updateCommandTemplate() {
+            const commandType = document.getElementById('commandType').value;
+            const paramsEl = document.getElementById('commandParams');
+            
+            switch(commandType) {
+                case 'tools/list':
+                    paramsEl.value = '';
+                    break;
+                case 'tools/call':
+                    paramsEl.value = JSON.stringify({
+                        name: 'list_projects',
+                        arguments: {}
+                    }, null, 2);
+                    break;
+                case 'resources/list':
+                    paramsEl.value = '';
+                    break;
+                case 'resources/read':
+                    paramsEl.value = JSON.stringify({
+                        uri: 'resource://projects/'
+                    }, null, 2);
+                    break;
+                case 'prompts/list':
+                    paramsEl.value = '';
+                    break;
+                case 'prompts/get':
+                    paramsEl.value = JSON.stringify({
+                        name: 'analyze_project',
+                        arguments: {
+                            project: 'my-project'
+                        }
+                    }, null, 2);
+                    break;
+            }
+        }
+
+        async function sendCommand() {
+            if (!connectionId) {
+                alert('Please connect to SSE first');
+                return;
+            }
+            
+            const commandType = document.getElementById('commandType').value;
+            const paramsText = document.getElementById('commandParams').value.trim();
+            
+            let params = null;
+            if (paramsText) {
+                try {
+                    params = JSON.parse(paramsText);
+                } catch (e) {
+                    alert('Invalid JSON in parameters');
+                    return;
+                }
+            }
+            
+            const message = {
+                method: commandType,
+                ...(params && { params })
+            };
+            
+            try {
+                const response = await fetch(`${getServerUrl()}/mcp/sse/send`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${getAuthToken()}`
+                    },
+                    body: JSON.stringify({
+                        connectionId,
+                        message
+                    })
+                });
+                
+                const result = await response.json();
+                commandsSent++;
+                logEvent('command', `Command sent: ${commandType}`, { message, result });
+                updateStats();
+                
+            } catch (error) {
+                logEvent('error', `Failed to send command: ${error.message}`);
+            }
+        }
+
+        async function sendToolsList() {
+            document.getElementById('commandType').value = 'tools/list';
+            updateCommandTemplate();
+            await sendCommand();
+        }
+
+        async function sendListProjects() {
+            document.getElementById('commandType').value = 'tools/call';
+            document.getElementById('commandParams').value = JSON.stringify({
+                name: 'list_projects',
+                arguments: {}
+            }, null, 2);
+            await sendCommand();
+        }
+
+        // Initialize
+        updateCommandTemplate();
+    </script>
+</body>
+</html>
